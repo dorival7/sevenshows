@@ -1,0 +1,11 @@
+## Ignore Visual Studio e .NET
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+## Ignore arquivos locais de upload/mídia do projeto
+wwwroot/upload/
+wwwroot/uploads/

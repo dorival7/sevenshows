@@ -1,0 +1,500 @@
+# ====================================================================
+# AUTENTICAÇÃO GLOBAL DO SAAS (SEVENSHOWS)
+# ====================================================================
+
+# @name realizarLogin
+POST http://localhost:5297/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@sevenshows.com.br",
+  "password": "AdminSeven7#"
+}
+
+###
+
+# Captura automaticamente o token do login acima para usar nas rotas abaixo
+@authToken = {{realizarLogin.response.body.token}}
+
+# ID de exemplo para testes de busca e atualização (Pode alterar após criar um plano)
+@planoId = 23a3d54c-1d98-4c4f-9e76-46c0e86b2bdf
+
+# ====================================================================
+# ROTAS DO MÓDULO DE PLANOS (SaaSPlansController)
+# ====================================================================
+
+### 1. CADASTRAR PLANO (PROTEGIDA - Exige Token de SuperAdmin)
+POST http://localhost:5297/api/saas-products
+Authorization: Bearer {{authToken}}
+Content-Type: application/json
+
+{
+  "name": "Plano Prata Profissional",
+  "description": "Acesso ilimitado à agenda e gerador automático de contratos",
+  "monthlyFee": 99.90,
+  "defaultTakeRatePercent": 3.0,
+  "maxShowsPerMonth": 99,
+  "maxPhotosCount": 20,
+  "maxVideosCount": 10,
+  "isActive": true
+}
+
+###
+
+### 2. RECUPERAR TODOS OS PLANOS (PÚBLICA - Não exige Token)
+GET http://localhost:5297/api/saas-products
+
+###
+
+### 3. BUSCAR PLANO ESPECÍFICO POR ID (PÚBLICA - Não exige Token)
+GET http://localhost:5297/api/saas-products/{{planoId}}
+
+###
+
+### 4. ATUALIZAR TAXAS E LIMITES DO PLANO (PROTEGIDA - Exige Token de SuperAdmin)
+PUT http://localhost:5297/api/saas-products/{{planoId}}
+Authorization: Bearer {{authToken}}
+Content-Type: application/json
+
+{
+  "name": "Plano Prata - Taxas Atualizadas",
+  "description": "Acesso ilimitado à agenda com suporte prioritário",
+  "monthlyFee": 109.90,
+  "defaultTakeRatePercent": 2.5,
+  "maxShowsPerMonth": 120,
+  "maxPhotosCount": 30,
+  "maxVideosCount": 15,
+  "isActive": true
+}
+
+# ====================================================================
+# ROTAS DO MÓDULO DE TENANTS / MÚSICOS (TenantsController)
+# ====================================================================
+
+# IDs de planos cadastrados no banco para associar ao músico nos testes
+@planoSelecionadoId = b15b7263-ff09-4407-b254-ebc2c9816a35
+@novoPlanoMigracaoId = eb4910ac-db32-4a9a-b2fd-afbcfb36074d
+
+### 1. REGISTRAR NOVO MÚSICO COM DADOS COMPLETOS E ENDEREÇO (ETAPA 1)
+POST http://localhost:5297/api/tenants/register
+Content-Type: application/json
+
+{
+  "name": "Banda Quatro",
+  "email": "bandaquatro@asaas.com",
+  "password": "BandaSenha123!",
+  "cpf": "644.581.160-45",
+  "cnpj": "83.014.479/0001-42",
+  "saaSPlanId": "{{planoSelecionadoId}}",
+  "street": "Rua das Flores",
+  "number": "500",
+  "complement": null,
+  "neighborhood": "Centro",
+  "city": "São Paulo",
+  "state": "SP",
+  "zipCode": "03401-001",
+  "birthDate": "1994-08-25T00:00:00Z",
+  "mobilePhone": "11988887777",
+  "incomeValue": 7500.00,
+  "companyType": "MEI"
+}
+
+###
+
+### 2. REALIZAR LOGIN COMO MÚSICO PARA CAPTURAR O TOKEN
+# @name loginMusico
+POST http://localhost:5297/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "bandadois@asaas.com",
+  "password": "BandaSenha123!"
+}
+
+###
+@tokenMusico = {{loginMusico.response.body.token}}
+
+###
+
+### 3. CONSULTAR PAINEL PRIVADO DO MÚSICO (ETAPA 2 - PROTEGIDA)
+# O sistema lerá o token e exibirá o perfil com a trava "profileStatus": "Incomplete"
+GET http://localhost:5297/api/tenants/me
+Authorization: Bearer {{tokenMusico}}
+
+###
+
+### 4. ATUALIZAR CADASTRO DO MÚSICO LOGADO (PROTEGIDA - Usa Token do Músico)
+PUT http://localhost:5297/api/tenants/me
+Authorization: Bearer {{tokenMusico}}
+Content-Type: application/json
+
+{
+  "name": "Banda de Rock S.A. - Nome Fantasia Atualizado"
+}
+
+###
+
+### 5. SIMULAR MIGRAÇÃO PARA OUTRO PLANO (PROTEGIDA - Usa Token do Músico)
+POST http://localhost:5297/api/tenants/me/migrate-plan
+Authorization: Bearer {{tokenMusico}}
+Content-Type: application/json
+
+{
+  "newSaaSPlanId": "{{novoPlanoMigracaoId}}"
+}
+
+###
+
+### 6. SIMULAR FILIAÇÃO E VINCULAÇÃO DO ASAAS WALLET (PROTEGIDA - Usa Token do Músico)
+POST http://localhost:5297/api/tenants/me/sync-asaas
+Authorization: Bearer {{tokenMusico}}
+Content-Type: application/json
+
+{
+  "asaasWalletId": "wallet_musico_producao_987654321"
+}
+
+# ====================================================================
+# CONFIGURAÇÕES COMERCIAIS E PACOTES (ETAPA 3)
+# ====================================================================
+
+### 1. SALVAR REGRAS DE LOGÍSTICA E FRETE (Move status para Incomplete_Packages)
+POST http://localhost:5297/api/tenants/commercial-settings
+Authorization: Bearer {{tokenMusico}}
+Content-Type: application/json
+
+{
+  "freeRadiusKm": 35,
+  "extraKmValue": 2.50,
+  "acceptExtraHours": true,
+  "extraHourValue": 150.00,
+  "attendedRegions": "Todo o estado de SP, Campinas e região metropolitana."
+}
+
+###
+
+### 2. ADICIONAR PRIMEIRO PACOTE DE SHOW (Move status para Incomplete_Media e liga controle)
+POST http://localhost:5297/api/tenants/packages
+Authorization: Bearer {{tokenMusico}}
+Content-Type: application/json
+
+{
+  "title": "Show Oficial Pocket Acústico",
+  "durationMinutes": 90,
+  "basePrice": 1200.00,
+  "description": "Formato reduzido ideal para bares e eventos corporativos de pequeno porte."
+}
+
+###
+
+### 3. CONSULTAR PERFIL NOVAMENTE PARA VALIDAR GRID E METADADOS DO VUE 3
+# Veja que agora 'currentPackagesCount' mudará para 1, 'canAddMorePackages' continuará true e listará o pacote.
+GET http://localhost:5297/api/tenants/me
+Authorization: Bearer {{tokenMusico}}
+
+###
+
+### 4. SIMULAR EDIÇÃO DE VALOR DO PACOTE (Preencha o ID real do pacote recebido na rota 3)
+@idPacoteCriado = 2bef5136-5951-4ad3-bb02-4f26903cbe40
+PUT http://localhost:5297/api/tenants/packages/{{idPacoteCriado}}
+Authorization: Bearer {{tokenMusico}}
+Content-Type: application/json
+
+{
+  "title": "Show Oficial Pocket Acústico - Taxas Atualizadas",
+  "durationMinutes": 90,
+  "basePrice": 1350.00,
+  "description": "Formato acústico com equipamentos de som compactos inclusos."
+}
+
+###
+
+### 5. SIMULAR EXCLUSÃO E LIBERAÇÃO DE VAGA NO GRID
+DELETE http://localhost:5297/api/tenants/packages/{{idPacoteCriado}}
+Authorization: Bearer {{tokenMusico}}
+
+
+# ====================================================================
+# GERENCIAMENTO DE MÍDIAS E GALERIA (ETAPA 3.5)
+# ====================================================================
+
+### 1. FAZER UPLOAD DA FOTO DE CAPA DO ARTISTA
+POST http://localhost:5297/api/tenants/media/cover
+Authorization: Bearer {{tokenMusico}}
+Content-Type: multipart/form-data; boundary=----WebKitFormBoundary
+
+------WebKitFormBoundary
+Content-Disposition: form-data; name="file"; filename="imagem_teste.jpg"
+Content-Type: image/jpeg
+
+< ./imagem_teste.jpg
+------WebKitFormBoundary--
+
+###
+
+### 2. FAZER UPLOAD DE FOTO PARA A GALERIA ESTILO INSTAGRAM
+POST http://localhost:5297/api/tenants/media/photos
+Authorization: Bearer {{tokenMusico}}
+Content-Type: multipart/form-data; boundary=----WebKitFormBoundary
+
+------WebKitFormBoundary
+Content-Disposition: form-data; name="caption"
+
+Minha primeira apresentação oficial com a banda completa! #rock
+------WebKitFormBoundary
+Content-Disposition: form-data; name="file"; filename="imagem_teste.jpg"
+Content-Type: image/jpeg
+
+< ./imagem_teste.jpg
+------WebKitFormBoundary--
+
+###
+
+### 3. VINCULAR UM VÍDEO OPCIONAL DO YOUTUBE
+POST http://localhost:5297/api/tenants/media/videos
+Authorization: Bearer {{tokenMusico}}
+Content-Type: application/json
+
+{
+  "videoUrl": "https://youtube.com",
+  "caption": "Videoclipe Oficial Gravado ao Vivo"
+}
+
+###
+
+### 4. CONSULTAR PERFIL COMPLETO COM TODAS AS COBRANÇAS E MÍDIAS (Usa Rota Geral da Etapa 2)
+# Se você executou a Rota 1 e a Rota 2 das mídias, verá que o "profileStatus" mudará automaticamente para "Pending_Payment"
+GET http://localhost:5297/api/tenants/me
+Authorization: Bearer {{tokenMusico}}
+
+
+
+# ====================================================================
+# MOTOR DE ASSINATURAS E WEBHOOKS DO ASAAS (ETAPA 4)
+# ====================================================================
+
+### 1. MÚSICO INICIALIZA ASSINATURA ESCOLHENDO PAGO VIA PIX (Cria Pedido)
+# @name checkoutPix
+POST http://localhost:5297/api/tenants/subscribe
+Authorization: Bearer {{tokenMusico}}
+Content-Type: application/json
+
+{
+  "paymentMethod": "PIX",
+  "creditCard": null
+}
+
+###
+@idAssinaturaPix = {{checkoutPix.response.body.subscriptionId}}
+
+###
+
+### 2. MÚSICO INICIALIZA ASSINATURA COBRADA NO CARTÃO DE CRÉDITO (Simula Tokenização)
+POST http://localhost:5297/api/tenants/subscribe
+Authorization: Bearer {{tokenMusico}}
+Content-Type: application/json
+
+{
+  "paymentMethod": "CREDIT_CARD",
+  "creditCard": {
+    "holderName": "JOAO TECLADO INSTRUMENTOS",
+    "number": "4444444444444444",
+    "expiryMonth": "12",
+    "expiryYear": "2032",
+    "ccv": "123"
+  }
+}
+
+###
+
+### 3. SIMULAR DISPARO REAL DO WEBHOOK DO ASAAS - SUCESSO / LIQUIDAÇÃO (Muda status para Active)
+POST http://localhost:5297/api/webhooks/asaas-saas
+Content-Type: application/json
+
+{
+  "event": "PAYMENT_RECEIVED",
+  "subscription": {
+    "id": "{{idAssinaturaPix}}",
+    "customer": "cus_000008889657",
+    "status": "ACTIVE"
+  }
+}
+
+###
+
+### 4. SIMULAR DISPARO REAL DO WEBHOOK DO ASAAS - INADIPLÊNCIA / ATRASO (Tranca o Músico)
+POST http://localhost:5297/api/webhooks/asaas-saas
+Content-Type: application/json
+
+{
+  "event": "PAYMENT_OVERDUE",
+  "subscription": {
+    "id": "{{idAssinaturaPix}}",
+    "customer": "cus_mock_987654321",
+    "status": "OVERDUE"
+  }
+}
+
+###
+
+### 5. CONSULTAR PERFIL DO MÚSICO PARA VALIDAR A VITRINE LIBERADA
+GET http://localhost:5297/api/tenants/me
+Authorization: Bearer {{tokenMusico}}
+
+
+# ====================================================================
+# GERENCIAMENTO DA AGENDA E DISPONIBILIDADE (ETAPA 5)
+# ====================================================================
+
+### 1. CONFIGURAR GRADE PADRÃO: DISPONÍVEL SEXTA-FEIRA (Das 19h às 03h)
+PUT http://localhost:5297/api/tenants/agenda/availability
+Authorization: Bearer {{tokenMusico}}
+Content-Type: application/json
+
+{
+  "dayOfWeek": 5,
+  "startTime": "19:00:00",
+  "endTime": "03:00:00",
+  "isAvailable": true
+}
+
+###
+
+### 2. CONFIGURAR GRADE PADRÃO: DISPONÍVEL SÁBADO (Das 18h às 04h)
+PUT http://localhost:5297/api/tenants/agenda/availability
+Authorization: Bearer {{tokenMusico}}
+Content-Type: application/json
+
+{
+  "dayOfWeek": 6,
+  "startTime": "18:00:00",
+  "endTime": "04:00:00",
+  "isAvailable": true
+}
+
+###
+
+### 3. CONSULTAR GRADE DE DISPONIBILIDADE ATUAL DO ARTISTA
+GET http://localhost:5297/api/tenants/agenda/availability
+Authorization: Bearer {{tokenMusico}}
+
+###
+
+### 4. TRAVAR MANUALMENTE UM DIA INTEIRO NO CALENDÁRIO (Simula férias/Indisponível)
+# @name criarTravaAgenda
+POST http://localhost:5297/api/tenants/agenda/blocks
+Authorization: Bearer {{tokenMusico}}
+Content-Type: application/json
+
+{
+  "blockDate": "2026-12-25T00:00:00Z",
+  "startTime": null,
+  "endTime": null,
+  "reason": "Feriado de Natal - Recesso da Banda"
+}
+
+###
+@idTravaCriada = {{criarTravaAgenda.response.body.id}}
+
+###
+
+### 5. CONSULTAR TODOS OS BLOQUEIOS ATIVOS (Alimenta as tags vermelhas do Velzon)
+GET http://localhost:5297/api/tenants/agenda/blocks
+Authorization: Bearer {{tokenMusico}}
+
+###
+
+### 6. SIMULAR DESBLOQUEIO DE HORÁRIO (Remove a trava e libera para os contratantes)
+DELETE http://localhost:5297/api/tenants/agenda/blocks/{{idTravaCriada}}
+Authorization: Bearer {{tokenMusico}}
+
+
+### 7. CONSULTAR VISÃO DE CALENDÁRIO MASTIGADA PARA O VELZON (ETAPA 5.5)
+# Dispare aqui. O sistema calculará o mês de dezembro inteirinho, misturando folgas, dias livres e travas.
+GET http://localhost:5297/api/tenants/agenda/calendar-view?month=12&year=2026
+Authorization: Bearer {{tokenMusico}}
+
+
+# ====================================================================
+# GERENCIAMENTO DE CARTEIRA DE SHOWS E SUBCONTAS (ETAPA 6)
+# ====================================================================
+
+### 1. ATIVAR E CRIAR CARTEIRA DIGITAL DE SHOWS NO ASAAS (CONTA MASTER 2)
+# Dispare aqui! O C# criará o parceiro na sua segunda conta do Asaas Sandbox e trará o link de Onboarding.
+POST http://localhost:5297/api/tenants/wallet/connect
+Authorization: Bearer {{tokenMusico}}
+
+###
+
+### 3. SIMULAÇÃO LOCAL: APROVAR DOCUMENTOS DO ARTISTA (Força status para APPROVED)
+# Use esta rota para simular que os analistas do Asaas aprovaram os documentos enviados no link.
+POST http://localhost:5297/api/tenants/wallet/simulate-kyc-approval
+Authorization: Bearer {{tokenMusico}}
+
+###
+
+### 2. CONSULTAR PERFIL DO MÚSICO PARA VERIFICAR STATUS DO BANNER (Status: PENDING)
+GET http://localhost:5297/api/tenants/me
+Authorization: Bearer {{tokenMusico}}
+
+###
+
+### 4. CONSULTAR PERFIL NOVAMENTE PARA CONFIRMAR LIBERAÇÃO TOTAL
+GET http://localhost:5297/api/tenants/me
+Authorization: Bearer {{tokenMusico}}
+
+# ====================================================================
+# 🏛️ ROTAS DO MÓDULO DE CONTRATANTES (ContratantesController)
+# ====================================================================
+
+# 🚀 CONFIGURAÇÃO DA PORTA: Casado perfeitamente na porta 5297 do seu SaaS
+@baseUrlContratante = http://localhost:5297/api/public/contratantes
+
+### 1. FLUXO DO CADASTRO SILENCIOSO (Silent Signup - Tabela Única)
+# Dispare aqui para criar a conta e persistir e-mail/senha em lote no MariaDB
+POST {{baseUrlContratante}}/cadastro-checkout
+Content-Type: application/json
+
+{
+  "nomeCompleto": "Carlos Contratante Silva",
+  "cpf": "123.456.789-00",
+  "celular": "(43) 99999-8888",
+  "email": "carlos.teste@sevenshows.com",
+  "senha": "SenhaSegura123",
+  "zipCode": "86010-000",
+  "logradouro": "Avenida Higienópolis",
+  "numero": "1500",
+  "bairro": "Centro",
+  "cidade": "Londrina",
+  "estado": "PR",
+  "complemento": "Apto 402"
+}
+
+###
+
+### 2. TENTATIVA DE LOGIN COM SENHA ERRADA (Cenário de Rejeição)
+# Dispare para testar o comportamento antifraude do BCrypt (Deve dar 401 Unauthorized)
+POST {{baseUrlContratante}}/login
+Content-Type: application/json
+
+{
+  "email": "carlos.teste@sevenshows.com",
+  "password": "SenhaIncorretaErrada"
+}
+
+###
+
+### 3. LOGIN DEDICADO DO CONTRATANTE COM SUCESSO (Autenticação Ativa)
+# Dispare aqui! O C# validará o hash e cuspirá as chaves token e user para o Vue 3
+# @name loginContratante
+POST {{baseUrlContratante}}/login
+Content-Type: application/json
+
+{
+  "email": "bbbbbb@eeee.mm",
+  "password": "111111"
+}
+
+###
+# Captura reativa do token do contratante para futuras rotas protegidas do painel dele
+@tokenContratanteAtivo = {{loginContratante.response.body.token}}
