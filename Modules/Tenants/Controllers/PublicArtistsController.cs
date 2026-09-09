@@ -183,86 +183,88 @@ public class PublicArtistsController : ControllerBase
   // 🏛️ GET: Consulta o Mapa de Calor de Disponibilidade Ajustado ao Banco
   // ====================================================================
   [HttpGet("/api/public/artists/{artistId:guid}/availability")]
-    public async Task<ActionResult> GetArtistAvailability([FromRoute] Guid artistId, [FromQuery] int mes, [FromQuery] int ano)
+  public async Task<ActionResult> GetArtistAvailability(
+      [FromRoute] Guid artistId, 
+      [FromQuery] int mes, 
+      [FromQuery] int ano, 
+      [FromQuery] Guid? contractorId) // 🚀 INJEÇÃO DO FRONT: Recebe o ID do contratante logado de forma opcional
+  {
+    if (mes < 1 || mes > 12 || ano < 2026)
     {
-      if (mes < 1 || mes > 12 || ano < 2026)
-      {
-          return BadRequest(new { mensagem = "Parâmetros de mês ou ano inválidos." });
-      }
-
-      var dataInicio = new DateTime(ano, mes, 1);
-      var dataFim = dataInicio.AddMonths(1).AddDays(-1);
-
-      // 1. BUSCA A GRADE SEMANAL COM O SEU RESPECTIVO HORÁRIO DE INÍCIO
-      var gradeSemanal = await _context.ArtistAvailabilities
-          .AsNoTracking()
-          .Where(a => a.UserId == artistId && a.IsAvailable)
-          .Select(a => new { a.DayOfWeek, a.StartTime })
-          .ToListAsync();
-
-      var diasDisponiveisSemana = gradeSemanal.Select(a => a.DayOfWeek).ToList();
-
-      // 2. BUSCA OS RANGES DE RECESSOS / FERIADOS
-      var bloqueiosAgenda = await _context.ArtistAgendaBlocks
-          .AsNoTracking()
-          .Where(b => b.UserId == artistId && 
-                      ((b.StartDate >= dataInicio && b.StartDate <= dataFim) || 
-                      (b.EndDate >= dataInicio && b.EndDate <= dataFim)))
-          .Select(b => new { b.StartDate, b.EndDate })
-          .ToListAsync();
-
-      // 3. BUSCA OS SHOWS JÁ CONFIRMADOS E PROPOSTAS ACEITAS
-      var showsConfirmados = await _context.ArtistEvents
-          .AsNoTracking()
-          .Where(e => e.UserId == artistId && e.EventDate >= dataInicio && e.EventDate <= dataFim && 
-                      (e.Status == "Confirmed" || e.Status == "Pre_Approved"))
-          .Select(e => e.EventDate.Day)
-          .ToListAsync();
-
-      var diasDoMes = new List<object>();
-      var totalDias = DateTime.DaysInMonth(ano, mes);
-
-      for (int dia = 1; dia <= totalDias; dia++)
-      {
-          var dataCorrente = new DateTime(ano, mes, dia);
-          int diaDaSemanaInt = (int)dataCorrente.DayOfWeek;
-          
-          string status = "folga";
-          string startTimeFormatado = null; // Nasce nulo por padrão para dias de folga
-
-          var estaBloqueado = bloqueiosAgenda.Any(b => 
-              dataCorrente.Date >= b.StartDate.Date && 
-              (b.EndDate.Year == 1 || dataCorrente.Date <= b.EndDate.Date));
-
-          if (estaBloqueado)
-          {
-              status = "bloqueado";
-          }
-          else if (showsConfirmados.Contains(dia))
-          {
-              status = "ocupado";
-          }
-          else if (diasDisponiveisSemana.Contains(diaDaSemanaInt))
-          {
-              status = "disponivel";
-              
-              // Mapeia o StartTime correspondente àquele dia da semana e formata para hh:mm
-              var configDia = gradeSemanal.FirstOrDefault(g => g.DayOfWeek == diaDaSemanaInt);
-              if (configDia != null)
-              {
-                  startTimeFormatado = configDia.StartTime.ToString(@"hh\:mm");
-              }
-          }
-
-          diasDoMes.Add(new { 
-              dia = dia, 
-              status = status,
-              startTime = startTimeFormatado 
-          });
-      }
-
-      return Ok(new { Ano = ano, Mes = mes, Dias = diasDoMes });
+        return BadRequest(new { mensagem = "Parâmetros de mês ou ano inválidos." });
     }
+
+    var dataInicio = new DateTime(ano, mes, 1);
+    var dataFim = dataInicio.AddMonths(1).AddDays(-1);
+
+    // 1. BUSCA A GRADE SEMANAL COM O SEU RESPECTIVO HORÁRIO DE INÍCIO
+    var gradeSemanal = await _context.ArtistAvailabilities
+        .AsNoTracking()
+        .Where(a => a.UserId == artistId && a.IsAvailable)
+        .Select(a => new { a.DayOfWeek, a.StartTime })
+        .ToListAsync();
+
+    var diasDisponiveisSemana = gradeSemanal.Select(a => a.DayOfWeek).ToList();
+
+    // 2. BUSCA OS RANGES DE RECESSOS / FERIADOS
+    var bloqueiosAgenda = await _context.ArtistAgendaBlocks
+        .AsNoTracking()
+        .Where(b => b.UserId == artistId && 
+                    ((b.StartDate >= dataInicio && b.StartDate <= dataFim) || 
+                    (b.EndDate >= dataInicio && b.EndDate <= dataFim)))
+        .Select(b => new { b.StartDate, b.EndDate })
+        .ToListAsync();
+
+    // 3. BUSCA OS SHOWS DO MÊS
+    var showsConfirmados = await _context.ArtistEvents
+        .AsNoTracking()
+        .Where(e => e.UserId == artistId && e.EventDate >= dataInicio && e.EventDate <= dataFim && 
+                    (e.Status == "Confirmed" || e.Status == "Pending" || e.Status == "Pre_Approved"))
+        .Select(e => new { e.EventDate.Day, e.ContractorId })
+        .ToListAsync();
+
+    var diasDoMes = new List<object>();
+    var totalDias = DateTime.DaysInMonth(ano, mes);
+
+    for (int dia = 1; dia <= totalDias; dia++)
+    {
+        var dataCorrente = new DateTime(ano, mes, dia);
+        int diaDaSemanaInt = (int)dataCorrente.DayOfWeek;
+        
+        string status = "folga";
+        string startTimeFormatado = null;
+
+        var estaBloqueado = bloqueiosAgenda.Any(b => 
+            dataCorrente.Date >= b.StartDate.Date && 
+            (b.EndDate.Year == 1 || dataCorrente.Date <= b.EndDate.Date));
+
+        var showNoDia = showsConfirmados.FirstOrDefault(s => s.Day == dia);
+
+        if (showNoDia != null)
+        {
+            // 🟡 "sua-reserva" (Amarelo) se bater com o contractorId enviado pelo front, senão 🔵 "reservado" (Azul)
+            status = (contractorId.HasValue && showNoDia.ContractorId == contractorId.Value) ? "sua-reserva" : "reservado";
+        }
+        else if (estaBloqueado)
+        {
+            status = "recesso"; // 🔴 Vermelho Danger
+        }
+        else if (diasDisponiveisSemana.Contains(diaDaSemanaInt))
+        {
+            status = "disponivel"; // 🌑 Cinza Escuro
+            
+            var configDia = gradeSemanal.FirstOrDefault(g => g.DayOfWeek == diaDaSemanaInt);
+            if (configDia != null)
+            {
+                startTimeFormatado = configDia.StartTime.ToString(@"hh\:mm");
+            }
+        }
+
+        diasDoMes.Add(new { dia = dia, status = status, startTime = startTimeFormatado });
+    }
+
+    return Ok(new { Ano = ano, Mes = mes, Dias = diasDoMes });
+  }
 
 
 }

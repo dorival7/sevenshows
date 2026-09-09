@@ -1,0 +1,129 @@
+# ====================================================================
+# SEVENSHOWS - MOTOR DE TESTES DO CONTRATANTE E FLUXO DE PAGAMENTO
+# ====================================================================
+
+# 🚀 CONFIGURAÇÃO DE AMBIENTE LOCAL
+@baseUrl = http://localhost:5297/api/public
+
+
+### 1. SIMULAR DISPARO REAL DO WEBHOOK DO ASAAS (LIQUIDAÇÃO DE PIX / CARTÃO)
+# ====================================================================
+# Instruções de Teste:
+# 1. Copie o código 'paymentId' (começa com pay_...) que apareceu no console 
+#    do seu navegador ou no terminal C# quando você gerou o QR Code do Pix.
+# 2. Cole esse código na propriedade "id" dentro do nó "payment" abaixo.
+# 3. Clique em "Send Request" para simular a confirmação financeira automática.
+# ====================================================================
+
+POST {{baseUrl}}/webhooks/asaas
+Content-Type: application/json
+
+{
+  "id": "evt_hmlg_0000001950157973",
+  "event": "PAYMENT_RECEIVED",
+  "dateCreated": "2026-09-07 19:46:08",
+  "payment": {
+    "object": "payment",
+    "id": "pay_8zakcj6limhkdgak",
+    "customer": "cus_000009033323",
+    "value": 812.50,
+    "netValue": 805.00,
+    "originalValue": null,
+    "interestValue": null,
+    "description": "Cachê em Custódia - Pix Proposta",
+    "billingType": "PIX",
+    "status": "RECEIVED",
+    "confirmedDate": "2026-09-07",
+    "paymentDate": "2026-09-07",
+    "clientPaymentDate": "2026-09-07 19:45:00",
+    "creditDate": "2026-09-07",
+    "estimatedCreditDate": "2026-09-07",
+    "invoiceUrl": "https://asaas.com",
+    "bankSlipUrl": null,
+    "transactionReceiptUrl": "https://asaas.com",
+    "invoiceNumber": "00015797",
+    "deleted": false,
+    "anticipatable": false,
+    "anticipado": false
+  }
+}
+
+### 2. SIMULAÇÃO REAL: LIQUIDAR PIX / CARTÃO VIA API (Mantém Custódia de Split)
+# ====================================================================
+# Instruções de Teste:
+# 1. Gere um novo QR Code Pix no front-end Vue 3.
+# 2. Copie o ID da cobrança (pay_...) que aparecer no terminal C#.
+# 3. Cole esse ID substituindo o código na URL abaixo.
+# 4. Clique em "Send Request" para realizar a baixa oficial na nuvem!
+# ====================================================================
+
+POST https://api-sandbox.asaas.com/v3/sandbox/payment/pay_9huocv2sqzeotezc/confirm
+accept: application/json
+access_token: $aact_hmlg_000MzkWODA2MWY2OGM3MWRlMTU1NWM3MzJlNzZmNGZhZGY60jGFHy2hfyTlMOGI3NjctNjczZi00NTdhLWJpNzYmQ4Nzc2MmMnNkYTA0
+User-Agent: SevenShowsAPI
+
+# ====================================================================
+# SEVENSHOWS - SETUP MESTRE DA INFRAESTRUTURA DE CONTA ESCROW (CUSTÓDIA)
+# ====================================================================
+
+# 🚀 DECLARAÇÃO SEGUIDA: Isola o hash ativo para blindar o interpretador do VS Code
+@tokenMestre =$aact_hmlg_000MzkwODA2MWY2OGM3MWRlMDU2NWM3MzJlNzZmNGZhZGY6OjA0NmRmNTViLTczMzQtNDg5OC05ODMwLWUzMWI3ODYyNGY5ZDo6JGFhY2hfZDNiY2IwNGEtNWRhMS00YzdkLTllM2MtZTg2MTUzM2UyNDNk
+
+### 🚀 ATIVAR CONFIGURAÇÃO PADRÃO DE GARANTIA PARA TODO O ECOSSISTEMA
+POST https://api-sandbox.asaas.com/v3/accounts/escrow
+accept: application/json
+access_token: {{tokenMestre}}
+User-Agent: SevenShowsAPI
+Content-Type: application/json
+
+{
+  "daysToExpire": 30,
+  "enabled": true,
+  "isFeePayer": false
+}
+
+# ====================================================================
+# SEVENSHOWS - SETUP DE CONTA ESCROW PARA A SUBCONTA DO ARTISTA (SANDBOX)
+# ====================================================================
+
+
+### 🚀 ATIVAR CONTA ESCROW ESPECIFICAMENTE PARA A BANDA QUATRO
+# Substitua o 'ID_DA_SUBCONTA' no meio da URL abaixo pelo identificador real do músico
+POST https://api-sandbox.asaas.com/v3/accounts/95445e5a-43e2-4b3b-bc09-6ad8b8a4e20f/escrow
+accept: application/json
+access_token: {{tokenMestre}}
+User-Agent: SevenShowsAPI
+Content-Type: application/json
+
+{
+  "daysToExpire": 30,
+  "enabled": true,
+  "isFeePayer": false
+}
+
+### 🔍 AUDITORIA DE INFRAESTRUTURA: CONSULTAR PARAMETROS DA CONTA ESCROW
+# Execute este GET para ler diretamente da nuvem do Asaas Sandbox 
+# se a trava de garantia global está ativa ("enabled": true) no ecossistema.
+GET https://api-sandbox.asaas.com/v3/accounts/escrow
+accept: application/json
+access_token: {{tokenMestre}}
+User-Agent: SevenShowsAPI
+
+### 🔍 AUDITORIA DE CUSTÓDIA: VERIFICAR SE A COBRANÇA ESTÁ PRESA NO ESCROW
+# Instruções: Gere o Pix no Vue 3, pegue o 'paymentId' (pay_...) e cole na URL abaixo.
+# Ao disparar este GET antes de pagar, o Asaas deve retornar o status "PENDING"
+# com os dados do repasse bloqueado, provando que o cadeado foi ativado pelo C#!
+GET https://api-sandbox.asaas.com/v3/payments/pay_90u7ct6ccjr231dy/escrow
+accept: application/json
+access_token: {{tokenMestre}}
+User-Agent: SevenShowsAPI
+
+//USA
+//$aact_hmlg_000MzkwODA2MWY2OGM3MWRlMDU2NWM3MzJlNzZmNGZhZGY6OjA0NmRmNTViLTczMzQtNDg5OC05ODMwLWUzMWI3ODYyNGY5ZDo6JGFhY2hfZDNiY2IwNGEtNWRhMS00YzdkLTllM2MtZTg2MTUzM2UyNDNk
+
+//Dorival
+//$aact_hmlg_000MzkwODA2MWY2OGM3MWRlMDU2NWM3MzJlNzZmNGZhZGY6OjFkZTE3NGVhLTY3OWYtNGQ3ZS04ZTZiLTBkMzBjZWY0NGIzNzo6JGFhY2hfYTlmOGI3NjctNjczZi00NTdhLWJiNzItYmQ4Nzc2MmNkYTA0
+
+
+//Banda4
+//$aact_hmlg_000MzkwODA2MWY2OGM3MWRlMDU2NWM3MzJlNzZmNGZhZGY6OjZhMGVjNThkLTJjZTUtNDg3Yi1hMjQ4LTExODE5ZTQwZDg2OTo6JGFhY2hfZjMxNGU1NTEtZTEyNC00NzU4LTllMDItMmM1ZDRiN2U2NzNk

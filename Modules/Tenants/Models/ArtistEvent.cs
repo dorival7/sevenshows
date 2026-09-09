@@ -76,6 +76,13 @@ public class ArtistEvent
 
     public string? Notes { get; set; }
 
+    public string? AsaasPaymentId { get; set; }
+
+    // ====================================================================
+    // 🔒 BLINDAGEM DE INTEGRIDADE: Chave Estrangeira do Contratante Logado
+    // ====================================================================
+    public Guid? ContractorId { get; set; }
+
     public ArtistEvent()
     {
         Id = Guid.NewGuid();

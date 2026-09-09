@@ -144,5 +144,28 @@ public class AppDbContext : DbContext
         modelBuilder.Entity("user_roles").HasData(
             new { user_id = adminUserId, role_id = "SuperAdmin" }
         );
+
+        var timezoneId = System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows)
+            ? "E. South America Standard Time"
+            : "America/Sao_Paulo";
+
+        var brZone = TimeZoneInfo.FindSystemTimeZoneById(timezoneId);
+
+        var dateTimeConverter = new Microsoft.EntityFrameworkCore.Storage.ValueConversion.ValueConverter<DateTime, DateTime>(
+            // 🚀 FORÇA TEXTO BRUTO: Converte para o fuso do Brasil se for UTC, e desativa o fuso (Unspecified) para o driver do MariaDB não alterar o dia!
+            v => DateTime.SpecifyKind(v.Kind == DateTimeKind.Utc ? TimeZoneInfo.ConvertTimeFromUtc(v, brZone) : v, DateTimeKind.Unspecified), 
+            v => DateTime.SpecifyKind(v, DateTimeKind.Unspecified) 
+        );
+
+        foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+        {
+            foreach (var property in entityType.GetProperties())
+            {
+                if (property.ClrType == typeof(DateTime) || property.ClrType == typeof(DateTime?))
+                {
+                    property.SetValueConverter(dateTimeConverter);
+                }
+            }
+        }
     }
 }

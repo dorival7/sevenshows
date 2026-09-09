@@ -107,7 +107,7 @@ POST http://localhost:5297/api/auth/login
 Content-Type: application/json
 
 {
-  "email": "bandadois@asaas.com",
+  "email": "bandaquatro@asaas.com",
   "password": "BandaSenha123!"
 }
 

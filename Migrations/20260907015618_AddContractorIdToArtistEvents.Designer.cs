@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using SevenShows.Api.Data;
 
@@ -11,9 +12,11 @@ using SevenShows.Api.Data;
 namespace SevenShows.Api.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260907015618_AddContractorIdToArtistEvents")]
+    partial class AddContractorIdToArtistEvents
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -164,7 +167,7 @@ namespace SevenShows.Api.Migrations
                         {
                             Id = new Guid("77777777-7777-7777-7777-777777777777"),
                             AsaasAccountStatus = "APPROVED",
-                            BirthDate = new DateTime(1979, 12, 31, 22, 0, 0, 0, DateTimeKind.Unspecified),
+                            BirthDate = new DateTime(1980, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             Cnpj = "00000000000100",
                             CompanyType = "LTDA",
                             Cpf = "00000000000",
@@ -461,9 +464,6 @@ namespace SevenShows.Api.Migrations
 
                     b.Property<Guid?>("ArtistPackageId")
                         .HasColumnType("char(36)");
-
-                    b.Property<string>("AsaasPaymentId")
-                        .HasColumnType("longtext");
 
                     b.Property<decimal>("BasePackagePrice")
                         .HasColumnType("decimal(18,2)");
