@@ -52,6 +52,10 @@ public class User
     // NOVOS CAMPOS REAIS DE COMPLIANCE E CARTEIRA (ETAPA 6)
     // ====================================================================
     [Required]
+    [StringLength(150)]
+    public string ResponsibleName { get; set; } = string.Empty;
+    
+    [Required]
     public DateTime BirthDate { get; set; }
 
     [Required]

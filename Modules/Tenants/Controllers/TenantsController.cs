@@ -12,7 +12,7 @@ namespace SevenShows.Api.Modules.Tenants.Controllers;
 
 // DTO de Entrada do Cadastro: Mapeamento Dinâmico sem variáveis chumbadas
 public record RegisterTenantRequest(
-    string Name, string Email, string Password, string Cpf, string? Cnpj, Guid SaaSPlanId,
+    string Name, string ResponsibleName, string Email, string Password, string Cpf, string? Cnpj, Guid SaaSPlanId,
     string Street, string Number, string? Complement, string Neighborhood, string City, string State, string ZipCode,
     DateTime BirthDate, string MobilePhone, decimal IncomeValue, string? CompanyType
 );
@@ -79,6 +79,7 @@ public class TenantsController : ControllerBase
         var novoUsuario = new User
         {
             Name = model.Name,
+            ResponsibleName = model.ResponsibleName.Trim(),
             Email = model.Email,
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(model.Password),
             PersonType = tipoPessoa,
