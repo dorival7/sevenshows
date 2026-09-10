@@ -69,10 +69,27 @@ namespace SevenShows.Api.Modules.Contratantes.Controllers
         await _context.SaveChangesAsync();
         await transacao.CommitAsync();
 
+        // Emissão do Token JWT original de esteira
         var tokenJWT = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJVc2VySWQiOiI" + novoContratante.Id + "\"}";
-        var perfil = new { id = novoContratante.Id, name = novoContratante.NomeCompleto, email = novoContratante.Email };
 
-        return Ok(new { success = true, token = tokenJWT, user = perfil });
+        // 🚀 EQUALIZAÇÃO GLOBAL: Entrega o perfil completo hidratado com o endereço recém-criado
+        var perfilExpandido = new
+        {
+          id = novoContratante.Id,
+          name = novoContratante.NomeCompleto,
+          email = novoContratante.Email,
+          cep = novoEndereco.ZipCode ?? "",
+          logradouro = novoEndereco.Logradouro ?? "",
+          bairro = novoEndereco.Bairro ?? "",
+          numero = novoEndereco.Numero ?? "",
+          cidade = novoEndereco.Cidade ?? "",
+          estado = novoEndereco.Estado ?? "",
+          complemento = novoEndereco.Complemento ?? "",
+          cpf = novoContratante.CPF,
+          celular = novoContratante.Celular
+        };
+
+        return Ok(new { success = true, token = tokenJWT, user = perfilExpandido });
       }
       catch (Exception ex)
       {
@@ -137,6 +154,121 @@ namespace SevenShows.Api.Modules.Contratantes.Controllers
       catch (Exception ex)
       {
         return BadRequest(new { message = "Formato de requisição inválido.", error = ex.Message });
+      }
+    }
+
+    [HttpPut("atualizar-perfil/{id:guid}")]
+    public async Task<IActionResult> AtualizarPerfil([FromRoute] Guid id, [FromBody] System.Text.Json.JsonElement request)
+    {
+      using var transacao = await _context.Database.BeginTransactionAsync();
+      try
+      {
+        // 1. Extração cirúrgica das strings vindas do formulário Vue 3
+        string nome = request.GetProperty("nomeCompleto").GetString()?.Trim();
+        string celular = request.GetProperty("celular").GetString()?.Trim();
+        string zipCode = request.GetProperty("zipCode").GetString()?.Trim()?.Replace("-", "");
+        string logradouro = request.GetProperty("logradouro").GetString()?.Trim();
+        string numero = request.GetProperty("numero").GetString()?.Trim();
+        string bairro = request.GetProperty("bairro").GetString()?.Trim();
+        string cidade = request.GetProperty("cidade").GetString()?.Trim();
+        string estado = request.GetProperty("estado").GetString()?.Trim();
+        string complemento = request.TryGetProperty("complemento", out var compProp) ? compProp.GetString()?.Trim() : null;
+
+        if (string.IsNullOrWhiteSpace(nome) || string.IsNullOrWhiteSpace(celular))
+          return BadRequest(new { success = false, message = "Nome completo e Celular são campos obrigatórios." });
+
+        // 2. BUSCA DO CONTRATANTE PRINCIPAL
+        var contratante = await _context.Contratantes.FirstOrDefaultAsync(c => c.Id == id);
+        if (contratante == null)
+          return NotFound(new { success = false, message = "Cadastro do contratante não localizado no sistema." });
+
+        // Atualiza os dados atômicos do usuário
+        contratante.NomeCompleto = nome;
+        contratante.Celular = celular;
+
+        // 3. BUSCA OU CRIAÇÃO DO ENDEREÇO ASSOCIADO
+        var endereco = await _context.ContratanteAddresses.FirstOrDefaultAsync(a => a.ContratanteId == id);
+        if (endereco == null)
+        {
+          endereco = new ContratanteAddress { Id = Guid.NewGuid(), ContratanteId = id };
+          _context.ContratanteAddresses.Add(endereco);
+        }
+
+        // Atualiza as colunas postais do rastro global
+        endereco.ZipCode = zipCode ?? "";
+        endereco.Logradouro = logradouro;
+        endereco.Numero = numero;
+        endereco.Bairro = bairro;
+        endereco.Cidade = cidade;
+        endereco.Estado = estado;
+        endereco.Complemento = complemento;
+
+        await _context.SaveChangesAsync();
+        await transacao.CommitAsync();
+
+        // 4. EMISSÃO DO PAYLOAD DE REIDRATAÇÃO GLOBAL (Mapeamento idêntico ao Login)
+        var perfilAtualizado = new
+        {
+          id = contratante.Id,
+          name = contratante.NomeCompleto,
+          email = contratante.Email,
+          cep = endereco.ZipCode ?? "",
+          logradouro = endereco.Logradouro ?? "",
+          bairro = endereco.Bairro ?? "",
+          numero = endereco.Numero ?? "",
+          cidade = endereco.Cidade ?? "",
+          estado = endereco.Estado ?? "",
+          complemento = endereco.Complemento ?? "",
+          cpf = contratante.CPF,
+          celular = contratante.Celular
+        };
+
+        return Ok(new { success = true, message = "Perfil e rastro de endereço global atualizados com sucesso absoluto!", user = perfilAtualizado });
+      }
+      catch (Exception ex)
+      {
+        await transacao.RollbackAsync();
+        return StatusCode(500, new { success = false, message = "Erro crítico interno ao atualizar dados cadastrais.", error = ex.Message });
+      }
+    }
+
+    // ====================================================================
+    // 🔒 PUT: Alteração de Senha Segura com Validação Isolada via BCrypt
+    // ====================================================================
+    [HttpPut("alterar-senha/{id:guid}")]
+    public async Task<IActionResult> AlterarSenha([FromRoute] Guid id, [FromBody] System.Text.Json.JsonElement request)
+    {
+      try
+      {
+        // 1. Captura cirúrgica das credenciais enviadas pela Aba 4 do Vue 3
+        string senhaAtual = request.GetProperty("senhaAtual").GetString();
+        string novaSenha = request.GetProperty("novaSenha").GetString();
+
+        if (string.IsNullOrWhiteSpace(senhaAtual) || string.IsNullOrWhiteSpace(novaSenha))
+          return BadRequest(new { success = false, message = "A senha atual e a nova senha são obrigatórias." });
+
+        if (novaSenha.Length < 6)
+          return BadRequest(new { success = false, message = "A nova senha deve conter no mínimo 6 caracteres." });
+
+        // 2. BUSCA DO CONTRATANTE NO BANCO MARIADB
+        var contratante = await _context.Contratantes.FirstOrDefaultAsync(c => c.Id == id);
+        if (contratante == null)
+          return NotFound(new { success = false, message = "Cadastro do contratante não localizado no sistema." });
+
+        // 3. VALIDAÇÃO DA SENHA ANTIGA CONTRA O PASSWORD_HASH ATUAL
+        if (!BCrypt.Net.BCrypt.Verify(senhaAtual, contratante.PasswordHash))
+          return BadRequest(new { success = false, message = "A senha atual informada está incorreta." });
+
+        // 4. CRIPTOGRAFIA DA NOVA CREDENCIAL E PERSISTÊNCIA ATÔMICA
+        contratante.PasswordHash = BCrypt.Net.BCrypt.HashPassword(novaSenha);
+        
+        await _context.SaveChangesAsync();
+
+        return Ok(new { success = true, message = "Sua credencial de acesso foi alterada com sucesso absoluto no portal!" });
+      }
+      catch (Exception ex)
+      {
+        return BadRequest(new { success = false, message = "Formato de requisição inválido para alteração de senha.", error = ex.Message });
       }
     }
   }

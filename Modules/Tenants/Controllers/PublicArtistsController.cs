@@ -152,7 +152,7 @@ public class PublicArtistsController : ControllerBase
   [HttpGet("/api/public/packages/{pacoteId:guid}")]
   public async Task<ActionResult> GetPublicPackageDetail([FromRoute] Guid pacoteId)
   {
-    // 🚀 PROJEÇÃO DE PERFORMANCE: Localiza o pacote no MariaDB e faz a ponte com os metadados do artista
+    // 🚀 PROJEÇÃO AVANÇADA: Cruza as tabelas mapeadas no EF Core de forma otimizada com subqueries
     var pacoteDetalhado = await _context.ArtistPackages
         .AsNoTracking()
         .Where(p => p.Id == pacoteId)
@@ -167,7 +167,34 @@ public class PublicArtistsController : ControllerBase
           UserId = p.UserId,
           NomeBanda = _context.Users.Where(u => u.Id == p.UserId).Select(u => u.Name).FirstOrDefault() ?? "Atração Sem Nome",
           EstiloMusical = _context.Users.Where(u => u.Id == p.UserId).Select(u => u.EstiloMusical).FirstOrDefault() ?? "Geral",
-          FormatoArtistico = _context.Users.Where(u => u.Id == p.UserId).Select(u => u.FormatoArtístico).FirstOrDefault() ?? "Banda"
+          FormatoArtistico = _context.Users.Where(u => u.Id == p.UserId).Select(u => u.FormatoArtístico).FirstOrDefault() ?? "Banda",
+
+          // 🗺️ LOGÍSTICA DE DISLOCAMENTO: Extrai reativamente da tabela 'artist_addresses'
+          CidadeOrigem = _context.ArtistAddresses
+                .Where(a => a.UserId == p.UserId)
+                .Select(a => a.City)
+                .FirstOrDefault() ?? "Não Informada",
+
+          EstadoOrigem = _context.ArtistAddresses
+                .Where(a => a.UserId == p.UserId)
+                .Select(a => a.State)
+                .FirstOrDefault() ?? string.Empty,
+
+          ZipCodeOrigem = _context.ArtistAddresses
+                .Where(a => a.UserId == p.UserId)
+                .Select(a => a.ZipCode)
+                .FirstOrDefault() ?? string.Empty,
+
+          // 🚚 REGRAS COMERCIAIS DE FRETE: Extrai reativamente da tabela 'artist_comercial_settings'
+          FreeRadiusKm = _context.ArtistComercialSettings
+                .Where(c => c.UserId == p.UserId)
+                .Select(c => c.FreeRadiusKm)
+                .FirstOrDefault(),
+
+          ExtraKmValue = _context.ArtistComercialSettings
+                .Where(c => c.UserId == p.UserId)
+                .Select(c => c.ExtraKmValue)
+                .FirstOrDefault()
         })
         .FirstOrDefaultAsync();
 
