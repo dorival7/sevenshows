@@ -75,6 +75,139 @@ public class PublicArtistsController : ControllerBase
     return Ok(resultado);
   }
 
+  // ====================================================================
+  // 🌍 🆕 ADICIONADO: Busca Avançada por Raio de 100 km por UF (Nacional)
+  // ====================================================================
+  [HttpGet("search-raio")]
+  public async Task<ActionResult> BuscarArtistasPorRaio([FromQuery] string cidade, [FromQuery] string uf)
+  {
+      if (string.IsNullOrEmpty(cidade) || string.IsNullOrEmpty(uf))
+      {
+          return BadRequest(new { mensagem = "Parâmetros 'cidade' e 'uf' são obrigatórios." });
+      }
+
+      string ufSanitizada = uf.ToUpper().Trim();
+      string cidadeBusca = cidade.Trim();
+
+      // 1. BUSCA INTELIGENTE NO BANCO: Usa o operador LIKE nativo do MariaDB para ignorar maiúsculas/minúsculas e acentos
+      var coordenadasOrigem = await _context.CoordenadasMunicipios
+          .AsNoTracking()
+          .FirstOrDefaultAsync(c => c.Uf == ufSanitizada && EF.Functions.Like(c.NomeCidade, $"%{cidadeBusca}%"));
+
+      // 💡 Contingência: Caso o contratante tenha digitado com abreviações, tenta uma varredura cruzada invertida em cache
+      if (coordenadasOrigem == null)
+      {
+          var todasCidadesDaUf = await _context.CoordenadasMunicipios
+              .AsNoTracking()
+              .Where(c => c.Uf == ufSanitizada)
+              .ToListAsync();
+
+          coordenadasOrigem = todasCidadesDaUf
+              .FirstOrDefault(c => c.NomeCidade.ToUpper().Contains(cidadeBusca.ToUpper()) || 
+                                  cidadeBusca.ToUpper().Contains(c.NomeCidade.ToUpper()));
+      }
+
+      if (coordenadasOrigem == null)
+      {
+          return NotFound(new { mensagem = $"A localidade '{cidade} - {uf}' não foi localizada na base geográfica nacional." });
+      }
+
+      double latOrigem = (double)coordenadasOrigem.Latitude;
+      double lngOrigem = (double)coordenadasOrigem.Longitude;
+
+      // ====================================================================
+      // 🚀 2. CONTINUAÇÃO DO CHASSI DA QUERY DE ARTISTAS DA UF (MANTIDO INTACTO)
+      // ====================================================================
+      var artistasDaUf = await _context.Users
+          .AsNoTracking()
+          .Where(u => u.ProfileStatus == "Active" && u.SubscriptionStatus == "Active")
+          .Select(u => new
+          {
+              Id = u.Id,
+              NomeBanda = u.Name,
+              Slug = u.Slug ?? string.Empty,
+              EstiloMusical = u.EstiloMusical ?? "Geral",
+              FormatoArtístico = u.FormatoArtístico ?? "Banda",
+              Slogan = u.Slogan ?? string.Empty,
+
+              CidadeAtendida = _context.ArtistAddresses
+                  .Where(a => a.UserId == u.Id)
+                  .Select(a => a.City)
+                  .FirstOrDefault() ?? "Não Informada",
+
+              State = _context.ArtistAddresses
+                  .Where(a => a.UserId == u.Id)
+                  .Select(a => a.State)
+                  .FirstOrDefault() ?? string.Empty,
+
+              FotoCapaUrl = _context.ArtistMedias
+                  .Where(m => m.UserId == u.Id && m.MediaType == "Cover")
+                  .Select(m => m.MediaUrl)
+                  .FirstOrDefault() ?? string.Empty,
+
+              PrecoBase = _context.ArtistPackages
+                  .Where(p => p.UserId == u.Id)
+                  .Select(p => p.BasePrice)
+                  .OrderBy(p => p)
+                  .FirstOrDefault()
+          })
+          .Where(a => a.State.ToUpper() == ufSanitizada)
+          .ToListAsync();
+
+      var coordenadasUfCache = await _context.CoordenadasMunicipios
+          .AsNoTracking()
+          .Where(c => c.Uf == ufSanitizada)
+          .ToListAsync();
+
+      var resultadoFinalRaio = new List<object>();
+
+      foreach (var artista in artistasDaUf)
+      {
+          // Sincroniza a leitura das cidades das bandas usando casamento elástico por string contida
+          var coordDestino = coordenadasUfCache
+              .FirstOrDefault(c => c.NomeCidade.ToUpper().Trim() == artista.CidadeAtendida.ToUpper().Trim() || 
+                                  c.NomeCidade.ToUpper().Contains(artista.CidadeAtendida.ToUpper()) ||
+                                  artista.CidadeAtendida.ToUpper().Contains(c.NomeCidade.ToUpper()));
+
+          if (coordDestino == null) continue;
+
+          double latDestino = (double)coordDestino.Latitude;
+          double lngDestino = (double)coordDestino.Longitude;
+
+          // Fórmula de Haversine
+          double R = 6371; 
+          double dLat = (latDestino - latOrigem) * Math.PI / 180;
+          double dLon = (lngDestino - lngOrigem) * Math.PI / 180;
+
+          double a = Math.Sin(dLat / 2) * Math.Sin(dLat / 2) +
+                     Math.Cos(latOrigem * Math.PI / 180) * Math.Cos(latDestino * Math.PI / 180) *
+                     Math.Sin(dLon / 2) * Math.Sin(dLon / 2);
+
+          double c = 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
+          double distanciaKm = R * c;
+
+          if (distanciaKm <= 100)
+          {
+              resultadoFinalRaio.Add(new
+              {
+                  artista.Id,
+                  artista.NomeBanda,
+                  artista.Slug,
+                  artista.EstiloMusical,
+                  artista.FormatoArtístico,
+                  artista.Slogan,
+                  artista.CidadeAtendida,
+                  artista.State,
+                  artista.FotoCapaUrl,
+                  artista.PrecoBase,
+                  DistanciaCalculada = Math.Round(distanciaKm, 1)
+              });
+          }
+      }
+
+      return Ok(resultadoFinalRaio);
+  }
+
   // 🆕 ADICIONADO: Endpoint Público para carregar os detalhes do EPK e os pacotes pelo Slug da URL
   [HttpGet("{slug}")]
   public async Task<ActionResult> GetArtistBySlug([FromRoute] string slug)
@@ -291,6 +424,30 @@ public class PublicArtistsController : ControllerBase
     }
 
     return Ok(new { Ano = ano, Mes = mes, Dias = diasDoMes });
+  }
+
+  // ====================================================================
+  // 🌍 🆕 ADICIONADO: Endpoint de Autocomplete Geográfico Nacional Ultra-Leve
+  // ====================================================================
+  [HttpGet("cities/autocomplete")] // 🛠️ O .NET unirá reativamente com api/public/artists resultando em api/public/artists/cities/autocomplete
+  public async Task<ActionResult<List<string>>> GetCitiesAutocomplete([FromQuery] string termo)
+  {
+      if (string.IsNullOrEmpty(termo) || termo.Trim().Length < 3)
+      {
+          return Ok(new List<string>());
+      }
+
+      string termoBusca = termo.Trim();
+
+      var cidadesFiltradas = await _context.CoordenadasMunicipios
+          .AsNoTracking()
+          .Where(c => EF.Functions.Like(c.NomeCidade, $"%{termoBusca}%"))
+          .OrderBy(c => c.NomeCidade)
+          .Select(c => $"{c.NomeCidade} - {c.Uf}")
+          .Take(10)
+          .ToListAsync();
+
+      return Ok(cidadesFiltradas);
   }
 
 
