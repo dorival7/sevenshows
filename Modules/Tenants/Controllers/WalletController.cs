@@ -22,7 +22,15 @@ public class WalletController : ControllerBase
         _walletService = walletService;
     }
 
-        // ====================================================================
+    // 📋 DTO de Entrada: Captura os dados de faturamento parametrizados no painel privado
+    public record ConnectWalletRequest(
+        string PersonType, 
+        string? Cnpj, 
+        string? CompanyType, 
+        decimal IncomeValue
+    );
+
+    // ====================================================================
     // 4. GET: Retorna o Histórico de Transações e Extrato Real do MySQL
     // ====================================================================
     // GET: api/tenants/wallet/transactions
@@ -50,22 +58,61 @@ public class WalletController : ControllerBase
     }
 
     [HttpPost("connect")]
-    public async Task<IActionResult> ConnectWallet()
+    public async Task<IActionResult> ConnectWallet([FromBody] ConnectWalletRequest request)
     {
-        var tenantIdLogado = ObterTenantIdLogado();
-        var user = await _context.Users.FindAsync(tenantIdLogado);
-        if (user == null) return NotFound("Músico não encontrado.");
+        var tenantIdLogado = ObterTenantIdLogado(); //
+        var user = await _context.Users.FindAsync(tenantIdLogado); //
+        if (user == null) return NotFound("Músico não encontrado."); //
 
-        if (!string.IsNullOrEmpty(user.AsaasWalletId))
-            return BadRequest(new { message = "Este músico já possui uma carteira conectada.", walletId = user.AsaasWalletId, link = user.AsaasOnboardingUrl });
+        // ====================================================================
+        // 💾 1. PERSISTÊNCIA ATÔMICA DOS DADOS COMERCIAIS NO BANCO DE DADOS
+        // ====================================================================
+        user.PersonType = request.PersonType.Trim(); //
+        user.IncomeValue = request.IncomeValue; //
 
-        var address = await _context.ArtistAddresses.FirstOrDefaultAsync(a => a.UserId == tenantIdLogado);
-        if (address == null) return BadRequest("O preenchimento do endereço é obrigatório.");
+        if (request.PersonType == "Legal") //
+        {
+            user.Cnpj = request.Cnpj?.Replace(".", "").Replace("/", "").Replace("-", "").Replace(" ", "").Trim(); //
+            user.CompanyType = request.CompanyType?.ToUpper().Trim(); //
+        }
+        else
+        {
+            user.Cnpj = null; //
+            user.CompanyType = null; //
+        }
 
+        await _context.SaveChangesAsync(); //
+        
+        // 🔍 LOG 1: Valida a gravação local e imprime os parâmetros recebidos do front-end
+        Console.WriteLine($"🎰 [AUDITORIA LOCAL] Banco atualizado para Usuário ID: {user.Id}");
+        Console.WriteLine($"   -> Nome Músico: {user.Name} | Email: {user.Email}");
+        Console.WriteLine($"   -> PersonType: {request.PersonType} | IncomeValue: {request.IncomeValue}");
+        Console.WriteLine($"   -> CNPJ Sanitizado: {user.Cnpj} | CompanyType: {user.CompanyType}");
+
+        // ====================================================================
+        // 🛡️ 2. TRATAMENTOS E TRAVAS DE SEGURANÇA E DEPENDÊNCIA ORIGINAIS
+        // ====================================================================
+        if (!string.IsNullOrEmpty(user.AsaasWalletId)) //
+            return BadRequest(new { message = "Este músico já possui uma carteira conectada.", walletId = user.AsaasWalletId, link = user.AsaasOnboardingUrl }); //
+
+        var address = await _context.ArtistAddresses.FirstOrDefaultAsync(a => a.UserId == tenantIdLogado); //
+        if (address == null) return BadRequest("O preenchimento do endereço é obrigatório."); //
+
+        // 🔍 LOG 2: Imprime os dados postais que serão injetados na requisição externa
+        Console.WriteLine($"🏡 [AUDITORIA POSTAL] Endereço localizado para cruzamento:");
+        Console.WriteLine($"   -> CEP: {address.ZipCode} | Número: {address.Number} | Rua: {address.Street}");
+
+        // ====================================================================
+        // 🚀 3. MONTAGEM DE PAYLOAD E FILIAÇÃO NO GATEWAY DE RECEBIMENTOS
+        // ====================================================================
         try
         {
-            string documento = user.PersonType == "Legal" ? user.Cnpj! : user.Cpf;
+            string documento = user.PersonType == "Legal" ? user.Cnpj! : user.Cpf; //
             
+            // 🔍 LOG 3: Alerta o momento exato do disparo com os dados processados
+            Console.WriteLine($"📡 [DISPARO ASAAS] Invocando CriarSubcontaParceiroAsync...");
+            Console.WriteLine($"   -> Documento Final Utilizado: {documento}");
+
             var asaasAccount = await _walletService.CriarSubcontaParceiroAsync(
                 user.Name, 
                 user.Email, 
@@ -78,42 +125,59 @@ public class WalletController : ControllerBase
                 user.MobilePhone,
                 user.IncomeValue,
                 user.CompanyType
-            );
+            ); //
 
-            // 1. Captura o ID da carteira filha de forma segura
-            user.AsaasWalletId = asaasAccount.GetProperty("id").GetString();
+            user.AsaasWalletId = asaasAccount.GetProperty("id").GetString(); //
 
-            // 2. CORREÇÃO BLINDADA: Tenta ler "onboardingUrl" ou "onboardingLink". Se o Asaas não enviar nenhum, evita o erro de dicionário.
-            if (asaasAccount.TryGetProperty("onboardingUrl", out var urlProp))
+            if (asaasAccount.TryGetProperty("onboardingUrl", out var urlProp)) //
             {
-                user.AsaasOnboardingUrl = urlProp.GetString();
+                user.AsaasOnboardingUrl = urlProp.GetString(); //
             }
-            else if (asaasAccount.TryGetProperty("onboardingLink", out var linkProp))
+            else if (asaasAccount.TryGetProperty("onboardingLink", out var linkProp)) //
             {
-                user.AsaasOnboardingUrl = linkProp.GetString();
+                user.AsaasOnboardingUrl = linkProp.GetString(); //
             }
             else
             {
-                // Fallback de segurança para ambiente de Sandbox caso nasça aprovado direto
-                user.AsaasOnboardingUrl = "https://asaas.com";
+                user.AsaasOnboardingUrl = "https://asaas.com"; //
             }
 
-            user.AsaasAccountStatus = "PENDING";
+            user.AsaasAccountStatus = "PENDING"; //
+            await _context.SaveChangesAsync(); //
 
-            // Salva as informações de verdade no MySQL
-            await _context.SaveChangesAsync();
+            Console.WriteLine($"✅ [SUCESSO TOTAL] Subconta autorizada pelo gateway! ID: {user.AsaasWalletId}"); //
 
             return Ok(new
             {
-                message = "Carteira digital de shows criada no Asaas com sucesso!",
+                message = "Carteira digital de shows criada com sucesso!",
                 walletId = user.AsaasWalletId,
                 onboardingLink = user.AsaasOnboardingUrl,
                 status = user.AsaasAccountStatus
-            });
+            }); //
         }
         catch (Exception ex)
         {
-            return BadRequest(new { erro = ex.Message });
+            // ====================================================================
+            // 🚨 CAPTURA DETALHADA DO VERDADEIRO ERRO (DIAGNÓSTICO DA REJEIÇÃO)
+            // ====================================================================
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine("💥 ==================== EXCEÇÃO DETECTADA NO WEB SERVICE ====================");
+            Console.WriteLine($"❌ Tipo da Exceção: {ex.GetType().FullName}");
+            Console.WriteLine($"❌ Mensagem do Erro: {ex.Message}");
+            
+            if (ex.InnerException != null)
+            {
+                Console.WriteLine($"❌ Causa Interna (InnerException): {ex.InnerException.Message}");
+            }
+            
+            Console.WriteLine($"❌ StackTrace simplificado: {ex.StackTrace?.Split('\n')[0]}");
+            Console.ResetColor();
+
+            // Devolve o detalhe técnico real na propriedade erro para inspeção no console do front-end
+            return BadRequest(new { 
+                erro = ex.Message, 
+                detalhe = ex.InnerException?.Message ?? "Verifique os logs detalhados vermelhos no terminal do C#." 
+            });
         }
     }
 
