@@ -21,10 +21,9 @@ public class PublicArtistsController : ControllerBase
   [HttpGet]
   public async Task<ActionResult<IEnumerable<PublicArtistDto>>> GetCatalog([FromQuery] string? estilo, [FromQuery] string? uf)
   {
-    // 🏛️ QUERY SÊNIOR UNIFICADA: Cruza as tabelas mapeadas no EF Core de forma otimizada
     var query = _context.Users
-        .AsNoTracking() // Melhora drasticamente a performance de leitura (Ignora o Change Tracker)
-        .Where(u => u.ProfileStatus == "Active" && u.SubscriptionStatus == "Active") // Apenas músicos ativos e homologados
+        .AsNoTracking() 
+        .Where(u => u.ProfileStatus == "Active" && u.SubscriptionStatus == "Active") 
         .Select(u => new PublicArtistDto
         {
           Id = u.Id,
@@ -34,10 +33,16 @@ public class PublicArtistsController : ControllerBase
           FormatoArtístico = u.FormatoArtístico ?? "Banda",
           Slogan = u.Slogan ?? string.Empty,
 
-          // Extrai a localização da tabela de endereços acoplada
+          // MANTIDO: Guarda a cidade física original para segurança do chassi
           CidadeAtendida = _context.ArtistAddresses
                 .Where(a => a.UserId == u.Id)
                 .Select(a => a.City)
+                .FirstOrDefault() ?? "Não Informada",
+
+          // 🆕 ADICIONADO: Extrai dinamicamente a região comercial da tabela artist_comercial_settings
+          RegiaoAtendida = _context.ArtistComercialSettings
+                .Where(c => c.UserId == u.Id)
+                .Select(c => c.AttendedRegions)
                 .FirstOrDefault() ?? "Não Informada",
 
           State = _context.ArtistAddresses
@@ -45,13 +50,11 @@ public class PublicArtistsController : ControllerBase
                 .Select(a => a.State)
                 .FirstOrDefault() ?? string.Empty,
 
-          // Captura dinamicamente a imagem do tipo 'Cover' cadastrada na esteira de mídias
           FotoCapaUrl = _context.ArtistMedias
                 .Where(m => m.UserId == u.Id && m.MediaType == "Cover")
                 .Select(m => m.MediaUrl)
                 .FirstOrDefault() ?? string.Empty,
 
-          // Algoritmo elástico: varre os pacotes do músico e extrai automaticamente o menor preço base
           PrecoBase = _context.ArtistPackages
                 .Where(p => p.UserId == u.Id)
                 .Select(p => p.BasePrice)
@@ -59,7 +62,6 @@ public class PublicArtistsController : ControllerBase
                 .FirstOrDefault()
         });
 
-    // 🚦 FILTRAGEM REATIVA EM MEMÓRIA DO BANCO (SERVER-SIDE)
     if (!string.IsNullOrEmpty(estilo))
     {
       query = query.Where(a => a.EstiloMusical.Contains(estilo));
@@ -71,7 +73,6 @@ public class PublicArtistsController : ControllerBase
     }
 
     var resultado = await query.ToListAsync();
-
     return Ok(resultado);
   }
 
@@ -188,6 +189,12 @@ public class PublicArtistsController : ControllerBase
 
           if (distanciaKm <= 100)
           {
+              // Busca rápida da região atendida para exibição textual no card
+              string regiaoComercial = _context.ArtistComercialSettings
+                  .Where(c => c.UserId == artista.Id)
+                  .Select(c => c.AttendedRegions)
+                  .FirstOrDefault() ?? artista.CidadeAtendida;
+
               resultadoFinalRaio.Add(new
               {
                   artista.Id,
@@ -196,7 +203,8 @@ public class PublicArtistsController : ControllerBase
                   artista.EstiloMusical,
                   artista.FormatoArtístico,
                   artista.Slogan,
-                  artista.CidadeAtendida,
+                  artista.CidadeAtendida, // 🚀 MANTIDO: Usado pelo motor de rotas
+                  RegiaoAtendida = regiaoComercial, // 🆕 ADICIONADO: Usado puramente para o texto do card
                   artista.State,
                   artista.FotoCapaUrl,
                   artista.PrecoBase,
