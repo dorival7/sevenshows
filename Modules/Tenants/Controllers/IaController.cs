@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using HtmlAgilityPack;
+using System.Globalization;
 
 namespace SevenShows.Api.Modules.Tenants.Controllers;
 
@@ -45,6 +46,12 @@ public class OptimizeSetlistRequest
   public List<string> Estilos { get; set; } = new();
   public string PerfilPublico { get; set; } = string.Empty;
   public int QtdMusicas { get; set; }
+
+  // Brasileiro | Internacional | Misto
+  public string TipoRepertorio { get; set; } = "Misto";
+
+  // Livre | Atual | Anos 2000 | Anos 80/90 | Clássicos
+  public string Epoca { get; set; } = "Livre";
 }
 
 public class GenerateCifraRequest
@@ -131,103 +138,1034 @@ public class IaController : ControllerBase
   }
 
   [HttpPost("optimize-setlist")]
-  public async Task<ActionResult> OptimizeSetlistReal([FromBody] OptimizeSetlistRequest request)
+  public async Task<ActionResult> OptimizeSetlistReal(
+    [FromBody] OptimizeSetlistRequest request)
   {
-    if (request == null || request.Estilos == null || request.Estilos.Count == 0 || string.IsNullOrWhiteSpace(request.PerfilPublico))
+    // ================================================================
+    // 1. VALIDAÇÕES
+    // ================================================================
+    if (request == null)
     {
-      return BadRequest(new { mensagem = "Os parâmetros 'estilos', 'perfilPublico' e 'qtdMusicas' são obrigatórios." });
+      return BadRequest(new
+      {
+        mensagem = "Requisição inválida."
+      });
     }
 
-    string? groqBaseUrl = _configuration["Groq:BaseUrl"];
-    string? groqApiKey = _configuration["Groq:ApiKey"];
-
-    if (string.IsNullOrWhiteSpace(groqBaseUrl) || string.IsNullOrWhiteSpace(groqApiKey))
+    if (request.Estilos == null || request.Estilos.Count == 0)
     {
-      return StatusCode(500, new { mensagem = "Configuração Groq ausente no appsettings.json." });
+      return BadRequest(new
+      {
+        mensagem = "Selecione pelo menos um estilo musical."
+      });
     }
 
-    string urlFinal = groqBaseUrl.EndsWith("/")
-        ? $"{groqBaseUrl}chat/completions"
-        : $"{groqBaseUrl}/chat/completions";
+    if (request.Estilos.Count > 3)
+    {
+      return BadRequest(new
+      {
+        mensagem = "Selecione no máximo 3 estilos musicais."
+      });
+    }
 
-    _http.DefaultRequestHeaders.Clear();
-    _http.DefaultRequestHeaders.Add("Authorization", $"Bearer {groqApiKey.Trim()}");
+    if (string.IsNullOrWhiteSpace(request.PerfilPublico))
+    {
+      return BadRequest(new
+      {
+        mensagem =
+              "Informe o perfil do público ou conceito do evento."
+      });
+    }
 
-    string estilosTexto = string.Join(", ", request.Estilos);
+    if (request.QtdMusicas < 5 || request.QtdMusicas > 30)
+    {
+      return BadRequest(new
+      {
+        mensagem =
+              "A quantidade de músicas deve estar entre 5 e 30."
+      });
+    }
 
-    // 🧠 AJUSTADO: Instruído explicitamente o tamanho curto de justificativa para economizar payload e tokens
-    var promptSistema = @"Você é um Diretor Musical sênior especializado em setlists.
-        REGRAS OBRIGATÓRIAS:
-        1. Responda APENAS um objeto JSON válido.
-        2. Nenhum texto antes ou depois do JSON.
-        3. Sem comentários, sem markdown, sem explicações.
-        4. Seja extremamente conciso, direto e objetivo nas frases de 'justificativaIA' (máximo 12 palavras).
-        5. Siga EXATAMENTE este formato:
+    string tipoRepertorio =
+        string.IsNullOrWhiteSpace(request.TipoRepertorio)
+            ? "Misto"
+            : request.TipoRepertorio.Trim();
+
+    string epoca =
+        string.IsNullOrWhiteSpace(request.Epoca)
+            ? "Livre"
+            : request.Epoca.Trim();
+
+    string estilosTexto =
+        string.Join(", ", request.Estilos);
+
+    string perfilPublico =
+        request.PerfilPublico.Trim();
+
+    // ================================================================
+    // 2. CONFIGURAÇÃO GROQ
+    // ================================================================
+    string? groqBaseUrl =
+        _configuration["Groq:BaseUrl"];
+
+    string? groqApiKey =
+        _configuration["Groq:ApiKey"];
+
+    if (string.IsNullOrWhiteSpace(groqBaseUrl) ||
+        string.IsNullOrWhiteSpace(groqApiKey))
+    {
+      return StatusCode(500, new
+      {
+        mensagem =
+              "Configuração Groq ausente no appsettings.json."
+      });
+    }
+
+    string urlFinal =
+        groqBaseUrl.EndsWith("/")
+            ? $"{groqBaseUrl}chat/completions"
+            : $"{groqBaseUrl}/chat/completions";
+
+    // ================================================================
+    // 3. ESTRUTURAS INTERNAS
+    // ================================================================
+    var musicasFinais =
+        new List<(
+            string Titulo,
+            string Artista,
+            string Justificativa
+        )>();
+
+    var chavesMusicas =
+        new HashSet<string>(
+            StringComparer.OrdinalIgnoreCase
+        );
+
+    // ================================================================
+    // 4. NORMALIZAÇÃO PARA DUPLICIDADES
+    // ================================================================
+    string NormalizarTexto(string texto)
+    {
+      if (string.IsNullOrWhiteSpace(texto))
+        return string.Empty;
+
+      string valor =
+          texto
+              .Trim()
+              .ToUpperInvariant()
+              .Normalize(
+                  NormalizationForm.FormD
+              );
+
+      var sb = new StringBuilder();
+
+      foreach (char caractere in valor)
+      {
+        UnicodeCategory categoria =
+            CharUnicodeInfo.GetUnicodeCategory(
+                caractere
+            );
+
+        if (categoria !=
+            UnicodeCategory.NonSpacingMark)
         {
-          ""resumoEstrategico"": ""texto aqui"",
-          ""sugestaoSetlist"": [
+          sb.Append(caractere);
+        }
+      }
+
+      valor =
+          sb
+              .ToString()
+              .Normalize(
+                  NormalizationForm.FormC
+              );
+
+      valor = Regex.Replace(
+          valor,
+          @"[^\p{L}\p{N}\s]",
+          " "
+      );
+
+      valor = Regex.Replace(
+          valor,
+          @"\s+",
+          " "
+      );
+
+      return valor.Trim();
+    }
+
+    string CriarChaveMusica(
+        string titulo,
+        string artista)
+    {
+      return
+          $"{NormalizarTexto(titulo)}|" +
+          $"{NormalizarTexto(artista)}";
+    }
+
+    // ================================================================
+    // 5. CURVA DO SHOW
+    // ================================================================
+    string ObterCurvaPorPosicao(
+        int posicao,
+        int total)
+    {
+      if (total <= 0)
+        return "Abertura";
+
+      double percentual =
+          (double)posicao / total;
+
+      if (percentual <= 0.20)
+        return "Abertura";
+
+      if (percentual <= 0.45)
+        return "Crescimento";
+
+      if (percentual <= 0.70)
+        return "Respiro";
+
+      if (percentual <= 0.90)
+        return "Pico";
+
+      return "Final";
+    }
+
+    string ObterOrientacaoCurva(
+        int posicaoInicial,
+        int quantidade,
+        int total)
+    {
+      int posicaoFinal =
+          Math.Min(
+              posicaoInicial +
+              quantidade -
+              1,
+              total
+          );
+
+      string inicio =
+          ObterCurvaPorPosicao(
+              posicaoInicial,
+              total
+          );
+
+      string fim =
+          ObterCurvaPorPosicao(
+              posicaoFinal,
+              total
+          );
+
+      if (inicio == fim)
+        return inicio;
+
+      return
+          $"{inicio} para {fim}";
+    }
+
+    // ================================================================
+    // 6. TEMPO DE RETRY DO 429
+    // ================================================================
+    double ExtrairSegundosRetry(
+        string corpo)
+    {
+      if (string.IsNullOrWhiteSpace(corpo))
+        return 12;
+
+      Match match = Regex.Match(
+          corpo,
+          @"try again in\s+([0-9]+(?:\.[0-9]+)?)s",
+          RegexOptions.IgnoreCase
+      );
+
+      if (
+          match.Success &&
+          double.TryParse(
+              match.Groups[1].Value,
+              NumberStyles.Any,
+              CultureInfo.InvariantCulture,
+              out double segundos
+          )
+      )
+      {
+        return segundos;
+      }
+
+      return 12;
+    }
+
+    // ================================================================
+    // 7. LEITURA SEGURA DO CONTENT
+    //
+    // Não assumimos mais que:
+    // choices[0].message.content
+    // sempre existe ou sempre é string.
+    // ================================================================
+    string ExtrairContentGroq(
+        string corpo)
+    {
+      if (string.IsNullOrWhiteSpace(corpo))
+        return string.Empty;
+
+      try
+      {
+        using JsonDocument documento =
+            JsonDocument.Parse(corpo);
+
+        JsonElement root =
+            documento.RootElement;
+
+        if (!root.TryGetProperty(
+                "choices",
+                out JsonElement choices))
+        {
+          return string.Empty;
+        }
+
+        if (choices.ValueKind !=
+            JsonValueKind.Array)
+        {
+          return string.Empty;
+        }
+
+        if (choices.GetArrayLength() == 0)
+        {
+          return string.Empty;
+        }
+
+        JsonElement choice =
+            choices[0];
+
+        if (!choice.TryGetProperty(
+                "message",
+                out JsonElement message))
+        {
+          return string.Empty;
+        }
+
+        if (message.ValueKind !=
+            JsonValueKind.Object)
+        {
+          return string.Empty;
+        }
+
+        if (!message.TryGetProperty(
+                "content",
+                out JsonElement content))
+        {
+          return string.Empty;
+        }
+
+        if (content.ValueKind ==
+            JsonValueKind.String)
+        {
+          return
+              content.GetString()?.Trim()
+              ?? string.Empty;
+        }
+
+        return string.Empty;
+      }
+      catch
+      {
+        return string.Empty;
+      }
+    }
+
+    // ================================================================
+    // 8. CHAMADA GROQ ROBUSTA
+    //
+    // Faz retry para:
+    //
+    // - HTTP 429
+    // - HTTP 200 com content vazio
+    //
+    // O retry acontece DENTRO do mesmo lote.
+    // ================================================================
+    async Task<string> ChamarGroqTexto(
+        string promptSistema,
+        string promptUsuario)
+    {
+      const int maxRetries429 = 5;
+      const int maxRetriesVazio = 2;
+
+      int retries429 = 0;
+      int retriesVazio = 0;
+
+      while (true)
+      {
+        var payload = new
+        {
+            model = "openai/gpt-oss-20b",
+
+            messages = new object[]
             {
-              ""ordem"": 1,
-              ""titulo"": ""Nome da Música"",
-              ""artistaOriginal"": ""Nome do Artista"",
-              ""curvaEnergia"": ""Alta"",
-              ""justificativaIA"": ""frase curta de marketing aqui""
-            }
-          ]
-        }";
+                new
+                {
+                    role = "user",
+                    content =
+                        promptSistema +
+                        "\n\n" +
+                        promptUsuario
+                }
+            },
 
-    var promptUsuario = $"Gere um setlist com exatamente {request.QtdMusicas} músicas, mesclando os estilos: {estilosTexto}. " +
-                        $"Público/Evento: {request.PerfilPublico}. " +
-                        $"Ordene por curva de energia: início instigante, meio estável, final explosivo.";
+            reasoning_effort = "low",
 
-    // 🎯 ATUALIZADO: maxTokens expandido para 3000 para garantir que caiba shows grandes de 20 a 30 músicas sem cortar
-    var requestBody = new GroqRequest(
-        model: "openai/gpt-oss-120b",
-        messages: new[]
+            include_reasoning = false,
+
+            temperature = 0.5,
+
+            max_completion_tokens = 1200
+        };
+
+        string jsonRequest =
+            JsonSerializer.Serialize(
+                payload
+            );
+
+        using var httpRequest =
+            new HttpRequestMessage(
+                HttpMethod.Post,
+                urlFinal
+            );
+
+        httpRequest.Headers
+            .TryAddWithoutValidation(
+                "Authorization",
+                $"Bearer {groqApiKey.Trim()}"
+            );
+
+        httpRequest.Content =
+            new StringContent(
+                jsonRequest,
+                Encoding.UTF8,
+                "application/json"
+            );
+
+        using var cts =
+            new CancellationTokenSource(
+                TimeSpan.FromSeconds(90)
+            );
+
+        HttpResponseMessage resposta;
+
+        try
         {
-                new ChatMessage("system", promptSistema),
-                new ChatMessage("user", promptUsuario)
-        },
-        responseFormat: new GroqResponseFormat("json_object"),
-        maxTokens: 3000,
-        temperature: 0.3
-    );
+          resposta =
+              await _http.SendAsync(
+                  httpRequest,
+                  cts.Token
+              );
+        }
+        catch (TaskCanceledException)
+        {
+          throw new TimeoutException(
+              "Timeout ao aguardar resposta da Groq."
+          );
+        }
 
-    string json = JsonSerializer.Serialize(requestBody);
-    var content = new StringContent(json, Encoding.UTF8, "application/json");
+        using (resposta)
+        {
+          string corpo =
+              await resposta.Content
+                  .ReadAsStringAsync();
+
+          // ====================================================
+          // HTTP 429
+          // ====================================================
+          if ((int)resposta.StatusCode == 429)
+          {
+            retries429++;
+
+            if (retries429 > maxRetries429)
+            {
+              throw new Exception(
+                  "A Groq permaneceu em rate limit " +
+                  "mesmo após as esperas automáticas."
+              );
+            }
+
+            double segundos =
+                ExtrairSegundosRetry(
+                    corpo
+                );
+
+            // margem adicional
+            segundos += 3;
+
+            segundos =
+                Math.Max(
+                    5,
+                    Math.Min(
+                        segundos,
+                        70
+                    )
+                );
+
+            Console.WriteLine(
+                $"[SETLIST] Rate limit. " +
+                $"Aguardando {segundos:F1}s. " +
+                $"Retry {retries429}/" +
+                $"{maxRetries429}."
+            );
+
+            await Task.Delay(
+                TimeSpan.FromSeconds(
+                    segundos
+                )
+            );
+
+            continue;
+          }
+
+          // ====================================================
+          // OUTRO ERRO HTTP
+          // ====================================================
+          if (!resposta.IsSuccessStatusCode)
+          {
+            throw new Exception(
+                $"Groq retornou HTTP " +
+                $"{(int)resposta.StatusCode}: " +
+                $"{corpo}"
+            );
+          }
+
+          // ====================================================
+          // HTTP 200
+          // ====================================================
+          string content =
+              ExtrairContentGroq(
+                  corpo
+              );
+
+          if (!string.IsNullOrWhiteSpace(
+                  content
+              ))
+          {
+            return content;
+          }
+
+          // ====================================================
+          // CONTENT VAZIO
+          // ====================================================
+          retriesVazio++;
+
+          if (retriesVazio >
+              maxRetriesVazio)
+          {
+            throw new Exception(
+                "Groq retornou conteúdo vazio " +
+                "após as tentativas automáticas."
+            );
+          }
+
+          Console.WriteLine(
+              $"[SETLIST] Groq retornou content vazio. " +
+              $"Aguardando 2s e repetindo o mesmo lote. " +
+              $"Retry {retriesVazio}/" +
+              $"{maxRetriesVazio}."
+          );
+
+          await Task.Delay(
+              TimeSpan.FromSeconds(2)
+          );
+        }
+      }
+    }
+
+    // ================================================================
+    // 9. PARSER
+    //
+    // Formato esperado:
+    //
+    // Título | Artista | Justificativa
+    // ================================================================
+    List<(
+        string Titulo,
+        string Artista,
+        string Justificativa
+    )> InterpretarResposta(
+        string resposta)
+    {
+      var resultado =
+          new List<(
+              string Titulo,
+              string Artista,
+              string Justificativa
+          )>();
+
+      if (string.IsNullOrWhiteSpace(resposta))
+        return resultado;
+
+      string texto =
+          resposta
+              .Replace(
+                  "```text",
+                  "",
+                  StringComparison.OrdinalIgnoreCase
+              )
+              .Replace(
+                  "```txt",
+                  "",
+                  StringComparison.OrdinalIgnoreCase
+              )
+              .Replace(
+                  "```",
+                  ""
+              )
+              .Trim();
+
+      string[] linhas =
+          texto.Split(
+              new[]
+              {
+                    "\r\n",
+                    "\n",
+                    "\r"
+              },
+              StringSplitOptions
+                  .RemoveEmptyEntries
+          );
+
+      foreach (
+          string linhaOriginal
+          in linhas
+      )
+      {
+        string linha =
+            linhaOriginal.Trim();
+
+        if (string.IsNullOrWhiteSpace(
+            linha
+        ))
+        {
+          continue;
+        }
+
+        // Remove numeração eventual:
+        // 1.
+        // 1)
+        // 01 -
+        linha = Regex.Replace(
+            linha,
+            @"^\s*\d+\s*[\.\)\-\:]\s*",
+            ""
+        );
+
+        if (!linha.Contains("|"))
+          continue;
+
+        string[] partes =
+            linha.Split('|');
+
+        if (partes.Length < 2)
+          continue;
+
+        string titulo =
+            partes[0].Trim();
+
+        string artista =
+            partes[1].Trim();
+
+        string justificativa =
+            partes.Length >= 3
+                ? string.Join(
+                    " | ",
+                    partes.Skip(2)
+                ).Trim()
+                : "Boa escolha para o perfil do público.";
+
+        titulo = Regex.Replace(
+            titulo,
+            @"^(t[ií]tulo|m[uú]sica)\s*:\s*",
+            "",
+            RegexOptions.IgnoreCase
+        ).Trim();
+
+        artista = Regex.Replace(
+            artista,
+            @"^artista\s*:\s*",
+            "",
+            RegexOptions.IgnoreCase
+        ).Trim();
+
+        justificativa =
+            Regex.Replace(
+                justificativa,
+                @"^(justificativa|estrat[eé]gia)\s*:\s*",
+                "",
+                RegexOptions.IgnoreCase
+            ).Trim();
+
+        if (string.IsNullOrWhiteSpace(
+                titulo) ||
+            string.IsNullOrWhiteSpace(
+                artista))
+        {
+          continue;
+        }
+
+        if (titulo.Length < 2 ||
+            artista.Length < 2)
+        {
+          continue;
+        }
+
+        resultado.Add(
+            (
+                titulo,
+                artista,
+                justificativa
+            )
+        );
+      }
+
+      return resultado;
+    }
+
+    // ================================================================
+    // 10. PROMPT DE SISTEMA
+    // ================================================================
+    string promptSistema = """
+Você é diretor musical profissional de shows ao vivo.
+
+Selecione somente músicas reais e artistas reais.
+Respeite estilo, público, origem, época e fase do show.
+Não repita músicas da lista de exclusão.
+Evite excesso do mesmo artista.
+Priorize músicas reconhecíveis pelo público.
+
+Cada resposta deve conter somente linhas no formato:
+
+Título | Artista | Justificativa curta
+
+Não use JSON.
+Não use Markdown.
+Não numere.
+Não escreva cabeçalho.
+Não escreva introdução ou conclusão.
+""";
 
     try
     {
-      var resposta = await _http.PostAsync(urlFinal, content);
-      var corpo = await resposta.Content.ReadAsStringAsync();
+      // ============================================================
+      // 11. MOTOR DE GERAÇÃO
+      //
+      // Lote máximo de 10.
+      //
+      // 10 → 10
+      // 15 → 10 + 5
+      // 20 → 10 + 10
+      // 30 → 10 + 10 + 10
+      //
+      // Se um lote vier parcial:
+      // calcula automaticamente o que ainda falta.
+      // ============================================================
+      const int tamanhoMaximoLote = 10;
 
-      if (!resposta.IsSuccessStatusCode)
+      // margem para complementações
+      const int maximoLotes = 8;
+
+      int numeroLote = 0;
+
+      while (
+          musicasFinais.Count <
+              request.QtdMusicas &&
+          numeroLote <
+              maximoLotes
+      )
       {
-        return StatusCode((int)resposta.StatusCode, new
+        numeroLote++;
+
+        int faltam =
+            request.QtdMusicas -
+            musicasFinais.Count;
+
+        int quantidadeLote =
+            Math.Min(
+                tamanhoMaximoLote,
+                faltam
+            );
+
+        int posicaoInicial =
+            musicasFinais.Count + 1;
+
+        string curva =
+            ObterOrientacaoCurva(
+                posicaoInicial,
+                quantidadeLote,
+                request.QtdMusicas
+            );
+
+        // ========================================================
+        // EXCLUSÃO
+        // ========================================================
+        string listaExclusao;
+
+        if (musicasFinais.Count == 0)
         {
-          mensagem = "Falha ao contatar IA",
-          detalhes = corpo
+          listaExclusao =
+              "Nenhuma.";
+        }
+        else
+        {
+          listaExclusao =
+              string.Join(
+                  "; ",
+                  musicasFinais.Select(
+                      m =>
+                          $"{m.Titulo} - {m.Artista}"
+                  )
+              );
+        }
+
+        // ========================================================
+        // PROMPT DO LOTE
+        // ========================================================
+        string promptLote = $"""
+Gere exatamente {quantidadeLote} músicas novas.
+
+Estilos: {estilosTexto}
+Público: {perfilPublico}
+Origem: {tipoRepertorio}
+Época: {epoca}
+Fase: {curva}
+
+Não repetir:
+{listaExclusao}
+
+Uma música por linha:
+
+Título | Artista | Justificativa curta
+
+Retorne somente as {quantidadeLote} linhas.
+""";
+
+        Console.WriteLine(
+            $"[SETLIST] Iniciando lote " +
+            $"{numeroLote}. " +
+            $"Pedido: {quantidadeLote}. " +
+            $"Atual: {musicasFinais.Count}/" +
+            $"{request.QtdMusicas}."
+        );
+
+        try
+        {
+          string respostaTexto =
+              await ChamarGroqTexto(
+                  promptSistema,
+                  promptLote
+              );
+
+          var musicasRecebidas =
+              InterpretarResposta(
+                  respostaTexto
+              );
+
+          int quantidadeAntes =
+              musicasFinais.Count;
+
+          foreach (
+              var musica
+              in musicasRecebidas
+          )
+          {
+            if (
+                musicasFinais.Count >=
+                request.QtdMusicas
+            )
+            {
+              break;
+            }
+
+            string chave =
+                CriarChaveMusica(
+                    musica.Titulo,
+                    musica.Artista
+                );
+
+            if (!chavesMusicas.Add(
+                    chave))
+            {
+              Console.WriteLine(
+                  "[SETLIST] Duplicada ignorada: " +
+                  $"{musica.Titulo} - " +
+                  $"{musica.Artista}"
+              );
+
+              continue;
+            }
+
+            musicasFinais.Add(
+                (
+                    musica.Titulo,
+                    musica.Artista,
+                    musica.Justificativa
+                )
+            );
+          }
+
+          int adicionadas =
+              musicasFinais.Count -
+              quantidadeAntes;
+
+          Console.WriteLine(
+              $"[SETLIST] Lote {numeroLote}: " +
+              $"pedido {quantidadeLote}, " +
+              $"parser {musicasRecebidas.Count}, " +
+              $"novas {adicionadas}, " +
+              $"total {musicasFinais.Count}/" +
+              $"{request.QtdMusicas}."
+          );
+        }
+        catch (Exception ex)
+        {
+          // Uma falha de lote não derruba imediatamente
+          // todo o repertório.
+          Console.WriteLine(
+              $"[SETLIST] Falha no lote " +
+              $"{numeroLote}/{maximoLotes}:"
+          );
+        }
+      }
+
+      // ============================================================
+      // 12. GARANTIA FINAL
+      // ================================================================
+      if (musicasFinais.Count <
+          request.QtdMusicas)
+      {
+        return StatusCode(502, new
+        {
+          mensagem =
+                "Não foi possível completar o repertório " +
+                "com músicas únicas.",
+
+          quantidadeSolicitada =
+                request.QtdMusicas,
+
+          quantidadeObtida =
+                musicasFinais.Count,
+
+          lotesIA =
+                numeroLote
         });
       }
 
-      var groqResp = JsonSerializer.Deserialize<GroqResponse>(corpo);
-      if (groqResp?.Choices == null || groqResp.Choices.Length == 0)
-      {
-        return StatusCode(500, new { mensagem = "A IA não retornou sugestões." });
-      }
+      // Segurança:
+      // jamais retornar mais que solicitado.
+      musicasFinais =
+          musicasFinais
+              .Take(
+                  request.QtdMusicas
+              )
+              .ToList();
 
-      string? conteudoJson = groqResp.Choices[0].Message.GetProperty("content").GetString();
-      if (string.IsNullOrWhiteSpace(conteudoJson))
-      {
-        return StatusCode(500, new { mensagem = "Resposta vazia da IA." });
-      }
+      // ============================================================
+      // 13. RESULTADO FINAL
+      // ================================================================
+      var setlistFinal =
+          musicasFinais
+              .Select(
+                  (musica, index) =>
+                  {
+                    int ordem =
+                          index + 1;
 
-      var resultado = JsonSerializer.Deserialize<JsonElement>(conteudoJson);
-      return Ok(resultado);
+                    string curvaEnergia =
+                          ObterCurvaPorPosicao(
+                              ordem,
+                              request.QtdMusicas
+                          );
+
+                    string justificativa =
+                          string.IsNullOrWhiteSpace(
+                              musica.Justificativa
+                          )
+                              ? "Boa escolha para o perfil do público."
+                              : musica.Justificativa.Trim();
+
+                    return new
+                    {
+                      ordem,
+
+                      titulo =
+                              musica.Titulo,
+
+                      artistaOriginal =
+                              musica.Artista,
+
+                      curvaEnergia,
+
+                      justificativaIA =
+                              justificativa
+                    };
+                  }
+              )
+              .ToList();
+
+      // ============================================================
+      // 14. RESUMO
+      // ================================================================
+      string resumoEstrategico =
+          $"Repertório de {request.QtdMusicas} músicas " +
+          $"em {estilosTexto}, direcionado ao perfil informado. " +
+          $"Seleção {tipoRepertorio.ToLowerInvariant()}, " +
+          $"com preferência {epoca.ToLowerInvariant()}, " +
+          $"organizada entre abertura, crescimento, " +
+          $"respiro, pico e final.";
+
+      // ============================================================
+      // 15. RETORNO
+      // ================================================================
+      return Ok(new
+      {
+        resumoEstrategico,
+
+        sugestaoSetlist =
+              setlistFinal,
+
+        quantidadeSolicitada =
+              request.QtdMusicas,
+
+        quantidadeGerada =
+              setlistFinal.Count,
+
+        lotesIA =
+              numeroLote,
+
+        filtros = new
+        {
+          estilos =
+                  request.Estilos,
+
+          tipoRepertorio,
+
+          epoca
+        }
+      });
+    }
+    catch (OperationCanceledException)
+    {
+      return StatusCode(504, new
+      {
+        mensagem =
+              "A IA demorou mais que o esperado " +
+              "para montar o repertório."
+      });
     }
     catch (Exception ex)
     {
-      return StatusCode(500, new { mensagem = "Erro interno", erro = ex.Message });
+      return StatusCode(500, new
+      {
+        mensagem =
+              "Erro interno ao otimizar o repertório.",
+
+        erro =
+              ex.Message
+      });
     }
   }
 
