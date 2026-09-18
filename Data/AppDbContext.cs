@@ -20,6 +20,8 @@ public class AppDbContext : DbContext
     {
     }
 
+    public DbSet<DesignerAsset> DesignerAssets { get; set; } = default!;
+    
     public DbSet<CoordenadasMunicipio> CoordenadasMunicipios { get; set; }
     public DbSet<SaaSInvoice> SaaSInvoices { get; set; }
     public DbSet<ArtistAvailability> ArtistAvailabilities { get; set; } = default!;

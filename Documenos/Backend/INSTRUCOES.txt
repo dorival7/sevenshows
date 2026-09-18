@@ -1,0 +1,41 @@
+SEVEN DESIGNER - BACKEND ETAPA 1
+
+1. Copie DesignerAsset.cs para Modules/Tenants/Models/
+2. Copie DesignerAssetsController.cs para Modules/Tenants/Controllers/
+
+3. AppDbContext.cs: junto aos DbSet, adicione:
+public DbSet<DesignerAsset> DesignerAssets { get; set; } = default!;
+
+4. SaaSPlan.cs: junto aos limites, adicione:
+public int MaxDesignerAssets { get; set; } = 10;
+
+5. SaaSPlansController.cs: em UpdatePlan, depois de MaxVideosCount:
+existingPlan.MaxDesignerAssets = updatedPlan.MaxDesignerAssets;
+
+6. Compile:
+dotnet build
+
+7. Gere a migration pelo .NET:
+dotnet ef migrations add AdicionarDesignerAssets
+
+8. ANTES de aplicar, confira a migration gerada.
+Ela deve criar designer_assets, adicionar MaxDesignerAssets a SaaSPlans,
+criar índice UserId e FK para users.Id.
+Se MaxDesignerAssets vier com defaultValue: 0 e você quer liberar os planos
+existentes imediatamente, ajuste a migration C# para defaultValue: 10.
+
+9. Aplique:
+dotnet ef database update
+
+Endpoints:
+GET    /api/tenants/designer-assets
+POST   /api/tenants/designer-assets (multipart/form-data, campo file)
+DELETE /api/tenants/designer-assets/{id}
+
+Arquivos físicos:
+wwwroot/uploads/designer-assets/{userId}/original/
+
+A pasta é criada automaticamente.
+
+OBS: BackgroundRemovedUrl já está preparado, mas a persistência da versão
+sem fundo será feita na próxima etapa.

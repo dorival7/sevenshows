@@ -122,7 +122,42 @@ GET http://localhost:5297/api/tenants/me
 Authorization: Bearer {{tokenMusico}}
 
 ###
+###Pega imagend do cartaz
+GET http://localhost:5297/api/tenants/designer-assets
+Authorization: Bearer {{tokenMusico}}
 
+###
+POST http://localhost:5297/api/tenants/designer-assets
+Authorization: Bearer {{tokenMusico}}
+Content-Type: multipart/form-data; boundary=boundary
+
+--boundary
+Content-Disposition: form-data; name="file"; filename="imagem_teste.jpg"
+Content-Type: image/jpeg
+
+< ./imagem_teste.jpg
+--boundary--
+
+###
+
+#####Posta Imagem
+POST http://localhost:5297/api/tenants/designer-assets
+Authorization: Bearer {{tokenMusico}}
+Content-Type: application/json
+{
+  "id": "...",
+  "originalFileName": "imagem_teste.jpg",
+  "contentType": "image/jpeg",
+  "originalUrl": "imagem_teste.jpg",
+  "backgroundRemovedUrl": null,
+  "sizeBytes": 123456,
+  "width": null,
+  "height": null,
+  "createdAt": "...",
+  "used": 1,
+  "limit": 10
+}
+###
 ### 4. ATUALIZAR CADASTRO DO MÚSICO LOGADO (PROTEGIDA - Usa Token do Músico)
 PUT http://localhost:5297/api/tenants/me
 Authorization: Bearer {{tokenMusico}}
