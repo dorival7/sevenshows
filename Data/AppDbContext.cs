@@ -7,6 +7,7 @@ using SevenShows.Api.Modules.SaasProducts.Models;
 using SevenShows.Api.Modules.Auth.Models;
 using SevenShows.Api.Modules.Tenants.Models;
 using SevenShows.Modules.Tenants.Models;
+using SevenShows.Api.Modules.Tenants.Repertorios.Models;
 
 namespace SevenShows.Api.Data;
 
@@ -21,6 +22,8 @@ public class AppDbContext : DbContext
     }
 
     public DbSet<DesignerAsset> DesignerAssets { get; set; } = default!;
+    public DbSet<Repertorio> Repertorios { get; set; } = default!;
+    public DbSet<RepertorioMusica> RepertorioMusicas { get; set; } = default!;
     public DbSet<DesignerPoster> DesignerPosters { get; set; } = default!;
     
     public DbSet<CoordenadasMunicipio> CoordenadasMunicipios { get; set; }
@@ -58,6 +61,22 @@ public class AppDbContext : DbContext
 
             entity.Property(p => p.DefaultTakeRatePercent)
                   .HasColumnType("decimal(5,2)");
+        });
+
+        modelBuilder.Entity<Repertorio>(entity =>
+        {
+            entity.HasIndex(x => new { x.UserId, x.UpdatedAt });
+            entity.HasMany(x => x.Musicas)
+                  .WithOne(x => x.Repertorio)
+                  .HasForeignKey(x => x.RepertorioId)
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<RepertorioMusica>(entity =>
+        {
+            entity.Property(x => x.CifraCompleta).HasColumnType("longtext");
+            entity.Property(x => x.HtmlEstruturado).HasColumnType("longtext");
+            entity.HasIndex(x => new { x.RepertorioId, x.Ordem });
         });
 
         modelBuilder.Entity<DesignerPoster>(entity =>
