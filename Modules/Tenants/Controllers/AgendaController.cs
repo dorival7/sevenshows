@@ -222,6 +222,20 @@ public class AgendaController : ControllerBase
                && e.Status != "Rejected") // Remove os recusados da árvore visual
         .ToListAsync();
 
+    // Logo opcional do contratante: carregado em lote para evitar N+1 queries.
+    var contractorIds = showsDoMes
+        .Where(e => e.ContractorId.HasValue)
+        .Select(e => e.ContractorId!.Value)
+        .Distinct()
+        .ToList();
+
+    var logosContratantes = contractorIds.Count == 0
+        ? new Dictionary<Guid, string?>()
+        : await _context.Contratantes
+            .AsNoTracking()
+            .Where(c => contractorIds.Contains(c.Id))
+            .ToDictionaryAsync(c => c.Id, c => c.LogoUrl);
+
     int diasNoMes = DateTime.DaysInMonth(year, month);
     var listaEventosCalendario = new List<object>();
 
@@ -261,6 +275,7 @@ public class AgendaController : ControllerBase
           title = show.Title ?? "Show sem Nome",
           status = show.Status,
           contractorName = show.ContractorName ?? "Não Informado",
+          contractorLogoUrl = show.ContractorId.HasValue && logosContratantes.TryGetValue(show.ContractorId.Value, out var logoUrl) ? logoUrl : null,
           eventType = show.EventType ?? "Show",
           eventDate = show.EventDate,
           venueName = show.VenueName ?? "Local Não Informado",

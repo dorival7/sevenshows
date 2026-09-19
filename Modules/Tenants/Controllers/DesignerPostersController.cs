@@ -53,6 +53,7 @@ public class DesignerPostersController : ControllerBase
                 x.TemplateId,
                 x.BackgroundId,
                 x.PreviewUrl,
+                x.EventId,
                 x.IsDraft,
                 x.IsActive,
                 x.CreatedAt,
@@ -202,6 +203,64 @@ public class DesignerPostersController : ControllerBase
 
         if (removedDraft) await CleanupOrphanedArchivedAssets(userId.Value);
         return Ok(ToEditorResponse(poster));
+    }
+
+    // Consulta leve usada pela Agenda para decidir entre "Criar cartaz" e "Abrir cartaz".
+    [HttpGet("by-event/{eventId:guid}")]
+    public async Task<IActionResult> GetByEvent(Guid eventId)
+    {
+        var userId = GetAuthenticatedUserId();
+        if (userId == null) return Unauthorized(new { message = "Usuário não identificado no token." });
+
+        var poster = await _context.DesignerPosters
+            .AsNoTracking()
+            .Where(x => x.UserId == userId.Value && x.EventId == eventId)
+            .Select(x => new { x.Id })
+            .FirstOrDefaultAsync();
+
+        return Ok(new { exists = poster != null, posterId = poster != null ? poster.Id : (Guid?)null });
+    }
+
+    public sealed class NewAgendaPosterRequest
+    {
+        public Guid EventId { get; set; }
+        public string? Name { get; set; }
+    }
+
+    // Fluxo Agenda -> Designer: um único cartaz por evento e por músico.
+    // Se já existir, apenas o reabre; nunca reinjeta os dados da Agenda sobre a edição existente.
+    [HttpPost("new-from-agenda")]
+    public async Task<IActionResult> NewFromAgenda([FromBody] NewAgendaPosterRequest? request)
+    {
+        var userId = GetAuthenticatedUserId();
+        if (userId == null) return Unauthorized(new { message = "Usuário não identificado no token." });
+        if (request == null || request.EventId == Guid.Empty)
+            return BadRequest(new { message = "Evento não informado." });
+
+        var existing = await _context.DesignerPosters
+            .FirstOrDefaultAsync(x => x.UserId == userId.Value && x.EventId == request.EventId);
+
+        if (existing != null)
+        {
+            await DeactivateOtherPosters(userId.Value, existing.Id);
+            existing.IsActive = true;
+            existing.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+            return Ok(new { poster = ToEditorResponse(existing), created = false });
+        }
+
+        await DeactivateOtherPosters(userId.Value, Guid.Empty);
+
+        var poster = CreateDraft(userId.Value);
+        poster.EventId = request.EventId;
+        var requestedName = request.Name?.Trim();
+        if (!string.IsNullOrWhiteSpace(requestedName))
+            poster.Name = requestedName.Length > 120 ? requestedName[..120] : requestedName;
+
+        _context.DesignerPosters.Add(poster);
+        await _context.SaveChangesAsync();
+
+        return Ok(new { poster = ToEditorResponse(poster), created = true });
     }
 
     [HttpPost("{id:guid}/open")]
@@ -409,6 +468,7 @@ public class DesignerPostersController : ControllerBase
     private static object ToEditorResponse(DesignerPoster poster) => new
     {
         poster.Id,
+        poster.EventId,
         poster.Name,
         poster.TemplateId,
         poster.BackgroundId,

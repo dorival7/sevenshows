@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using SevenShows.Api.Data;
 
@@ -11,9 +12,11 @@ using SevenShows.Api.Data;
 namespace SevenShows.Api.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260919152258_AdicionarLogoContratante")]
+    partial class AdicionarLogoContratante
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -45314,9 +45317,6 @@ namespace SevenShows.Api.Migrations
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime(6)");
-
-                    b.Property<Guid?>("EventId")
-                        .HasColumnType("char(36)");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("tinyint(1)");

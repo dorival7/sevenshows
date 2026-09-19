@@ -2,6 +2,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System;
 using System.Threading.Tasks;
+using System.IO;
+using Microsoft.AspNetCore.Hosting;
 using SevenShows.Api.Data;
 using SevenShows.Api.Modules.Contratantes.Models;
 using SevenShows.Api.Modules.Contratantes.Domain.Entities;
@@ -16,10 +18,12 @@ namespace SevenShows.Api.Modules.Contratantes.Controllers
   public class ContratantesController : ControllerBase
   {
     private readonly AppDbContext _context;
+    private readonly IWebHostEnvironment _environment;
 
-    public ContratantesController(AppDbContext context)
+    public ContratantesController(AppDbContext context, IWebHostEnvironment environment)
     {
       _context = context;
+      _environment = environment;
     }
 
     [HttpGet("check-email")]
@@ -86,7 +90,8 @@ namespace SevenShows.Api.Modules.Contratantes.Controllers
           estado = novoEndereco.Estado ?? "",
           complemento = novoEndereco.Complemento ?? "",
           cpf = novoContratante.CPF,
-          celular = novoContratante.Celular
+          celular = novoContratante.Celular,
+          logoUrl = novoContratante.LogoUrl
         };
 
         return Ok(new { success = true, token = tokenJWT, user = perfilExpandido });
@@ -147,7 +152,8 @@ namespace SevenShows.Api.Modules.Contratantes.Controllers
 
             // ⚡ INJETADO: CPF e Celular reais do banco alimentando a tela de faturamento
             cpf = contratante.CPF,
-            celular = contratante.Celular
+            celular = contratante.Celular,
+            logoUrl = contratante.LogoUrl
           }
         });
       }
@@ -155,6 +161,73 @@ namespace SevenShows.Api.Modules.Contratantes.Controllers
       {
         return BadRequest(new { message = "Formato de requisição inválido.", error = ex.Message });
       }
+    }
+
+    // ====================================================================
+    // 🖼️ LOGO OPCIONAL DO CONTRATANTE / ESTABELECIMENTO
+    // ====================================================================
+    [HttpPost("{id:guid}/logo")]
+    [RequestSizeLimit(5 * 1024 * 1024)]
+    public async Task<IActionResult> UploadLogo([FromRoute] Guid id, [FromForm] IFormFile file)
+    {
+      if (file == null || file.Length == 0)
+        return BadRequest(new { message = "Selecione uma imagem para o logo." });
+
+      if (file.Length > 5 * 1024 * 1024)
+        return BadRequest(new { message = "O logo deve ter no máximo 5 MB." });
+
+      var extensao = Path.GetExtension(file.FileName).ToLowerInvariant();
+      var extensoesPermitidas = new[] { ".png", ".jpg", ".jpeg", ".webp" };
+      if (!extensoesPermitidas.Contains(extensao))
+        return BadRequest(new { message = "Formato inválido. Use PNG, JPG, JPEG ou WEBP." });
+
+      var contratante = await _context.Contratantes.FirstOrDefaultAsync(c => c.Id == id);
+      if (contratante == null)
+        return NotFound(new { message = "Contratante não localizado." });
+
+      var webRoot = _environment.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+      var pasta = Path.Combine(webRoot, "uploads", "contratantes", id.ToString("N"));
+      Directory.CreateDirectory(pasta);
+
+      // Remove o arquivo anterior deste contratante para não acumular logos órfãos.
+      if (!string.IsNullOrWhiteSpace(contratante.LogoUrl) && contratante.LogoUrl.StartsWith("/uploads/contratantes/"))
+      {
+        var anteriorRelativo = contratante.LogoUrl.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
+        var anteriorFisico = Path.Combine(webRoot, anteriorRelativo);
+        if (System.IO.File.Exists(anteriorFisico)) System.IO.File.Delete(anteriorFisico);
+      }
+
+      var nomeArquivo = $"logo-{Guid.NewGuid():N}{extensao}";
+      var caminhoFisico = Path.Combine(pasta, nomeArquivo);
+      await using (var stream = new FileStream(caminhoFisico, FileMode.Create))
+      {
+        await file.CopyToAsync(stream);
+      }
+
+      contratante.LogoUrl = $"/uploads/contratantes/{id:N}/{nomeArquivo}";
+      await _context.SaveChangesAsync();
+
+      return Ok(new { success = true, logoUrl = contratante.LogoUrl });
+    }
+
+    [HttpDelete("{id:guid}/logo")]
+    public async Task<IActionResult> RemoverLogo([FromRoute] Guid id)
+    {
+      var contratante = await _context.Contratantes.FirstOrDefaultAsync(c => c.Id == id);
+      if (contratante == null)
+        return NotFound(new { message = "Contratante não localizado." });
+
+      var webRoot = _environment.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+      if (!string.IsNullOrWhiteSpace(contratante.LogoUrl) && contratante.LogoUrl.StartsWith("/uploads/contratantes/"))
+      {
+        var relativo = contratante.LogoUrl.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
+        var fisico = Path.Combine(webRoot, relativo);
+        if (System.IO.File.Exists(fisico)) System.IO.File.Delete(fisico);
+      }
+
+      contratante.LogoUrl = null;
+      await _context.SaveChangesAsync();
+      return Ok(new { success = true, logoUrl = (string)null });
     }
 
     [HttpPut("atualizar-perfil/{id:guid}")]
@@ -220,7 +293,8 @@ namespace SevenShows.Api.Modules.Contratantes.Controllers
           estado = endereco.Estado ?? "",
           complemento = endereco.Complemento ?? "",
           cpf = contratante.CPF,
-          celular = contratante.Celular
+          celular = contratante.Celular,
+          logoUrl = contratante.LogoUrl
         };
 
         return Ok(new { success = true, message = "Perfil e rastro de endereço global atualizados com sucesso absoluto!", user = perfilAtualizado });

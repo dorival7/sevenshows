@@ -81,6 +81,7 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<DesignerPoster>(entity =>
         {
+            entity.HasIndex(p => new { p.UserId, p.EventId }).IsUnique();
             entity.Property(p => p.StateJson).HasColumnType("longtext");
             entity.HasIndex(p => new { p.UserId, p.IsDraft });
             entity.HasIndex(p => new { p.UserId, p.IsActive });

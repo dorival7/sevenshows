@@ -36,6 +36,9 @@ namespace SevenShows.Api.Modules.Contratantes.Context
                 .IsRequired()
                 .HasMaxLength(255);
 
+            builder.Property(c => c.LogoUrl)
+                .HasMaxLength(500);
+
             // INDEXADOR DE PERFORMANCE: Blinda a integridade forçando e-mails únicos na base
             builder.HasIndex(c => c.Email)
                 .IsUnique();

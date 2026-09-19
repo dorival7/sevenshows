@@ -17,6 +17,9 @@ namespace SevenShows.Api.Modules.Contratantes.Domain.Entities
         // 🚀 INJETADO: E-mail e Senha morando na mesma tabela de domínio comercial
         public string Email { get; set; } = string.Empty;
         public string PasswordHash { get; set; } = string.Empty;
+
+        // Logo opcional do contratante/estabelecimento.
+        public string? LogoUrl { get; set; }
         
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 

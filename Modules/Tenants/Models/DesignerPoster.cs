@@ -16,6 +16,10 @@ public class DesignerPoster
     [ForeignKey(nameof(UserId))]
     public User? User { get; set; }
 
+    // Preenchido somente para cartazes originados da Agenda.
+    // Permite reabrir o mesmo cartaz sem criar duplicatas a cada clique.
+    public Guid? EventId { get; set; }
+
     [Required, StringLength(150)]
     public string Name { get; set; } = "Cartaz em criação";
 
