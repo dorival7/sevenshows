@@ -14,6 +14,7 @@ public class SaaSPlan
     public int MaxVideosCount { get; set; }
     public bool IsActive { get; set; }
     public int MaxDesignerAssets { get; set; } = 10;
+    public int MaxDesignerPosters { get; set; } = 10;
 
     // NOVO: Período de vigência da assinatura em meses (Padrão 12)
     public int DurationMonths { get; set; } = 12;

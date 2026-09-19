@@ -21,6 +21,7 @@ public class AppDbContext : DbContext
     }
 
     public DbSet<DesignerAsset> DesignerAssets { get; set; } = default!;
+    public DbSet<DesignerPoster> DesignerPosters { get; set; } = default!;
     
     public DbSet<CoordenadasMunicipio> CoordenadasMunicipios { get; set; }
     public DbSet<SaaSInvoice> SaaSInvoices { get; set; }
@@ -57,6 +58,14 @@ public class AppDbContext : DbContext
 
             entity.Property(p => p.DefaultTakeRatePercent)
                   .HasColumnType("decimal(5,2)");
+        });
+
+        modelBuilder.Entity<DesignerPoster>(entity =>
+        {
+            entity.Property(p => p.StateJson).HasColumnType("longtext");
+            entity.HasIndex(p => new { p.UserId, p.IsDraft });
+            entity.HasIndex(p => new { p.UserId, p.IsActive });
+            entity.HasIndex(p => p.UpdatedAt);
         });
 
         modelBuilder.Entity<User>(entity =>

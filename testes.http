@@ -533,3 +533,293 @@ Content-Type: application/json
 ###
 # Captura reativa do token do contratante para futuras rotas protegidas do painel dele
 @tokenContratanteAtivo = {{loginContratante.response.body.token}}
+
+
+# ====================================================================
+# SEVEN DESIGNER — CARTAZES / AUTOSAVE
+# ====================================================================
+
+### 1. LISTAR CARTAZES
+# Draft não deve consumir o limite do plano.
+GET http://localhost:5297/api/tenants/designer-posters
+Authorization: Bearer {{tokenMusico}}
+
+###
+
+### 2. OBTER OU CRIAR O CARTAZ ATIVO
+# Primeira execução:
+# - se não existir ativo, cria "Cartaz em criação"
+# - IsDraft deve ser true
+# - IsActive deve ser true
+POST http://localhost:5297/api/tenants/designer-posters/active/ensure
+Authorization: Bearer {{tokenMusico}}
+
+###
+
+### 3. EXECUTAR NOVAMENTE — NÃO PODE CRIAR OUTRO
+# O ID retornado aqui deve ser exatamente o mesmo da chamada anterior.
+POST http://localhost:5297/api/tenants/designer-posters/active/ensure
+Authorization: Bearer {{tokenMusico}}
+
+###
+
+### 4. LISTAR NOVAMENTE
+# Esperado enquanto existir apenas o draft:
+# used = 0
+# limit = limite do SaaSPlan
+# canCreate = true (se houver vaga)
+GET http://localhost:5297/api/tenants/designer-posters
+Authorization: Bearer {{tokenMusico}}
+
+# ====================================================================
+# SEVEN DESIGNER — TESTES DE AUTOSAVE / PERSISTÊNCIA
+# ====================================================================
+
+@posterId = 7696c09d-e293-44e3-a007-aa2b3c8c5968
+
+
+### 5. AUTOSAVE — SALVAR ESTADO DO CARTAZ
+# Deve atualizar o cartaz existente.
+# NÃO pode criar outro cartaz.
+# NÃO pode consumir uma vaga do plano.
+PUT http://localhost:5297/api/tenants/designer-posters/{{posterId}}/autosave
+Authorization: Bearer {{tokenMusico}}
+Content-Type: application/json
+
+{
+  "templateId": "sertanejo-sunset",
+  "backgroundId": "bkg16",
+  "stateJson": "{\"dados\":{\"artista\":\"Banda Quatro\",\"data\":\"2026-09-18\",\"horario\":\"20:30\",\"local\":\"Fazenda Monte Belo\",\"cidade\":\"Cornelio Procopio - PR\",\"chamada\":\"Show ao vivo\",\"extra\":\"Teste de autosave\"},\"textosLivres\":[{\"id\":\"texto-teste-1\",\"texto\":\"Teste persistente\",\"x\":120,\"y\":300}],\"imagensCartaz\":[],\"formasCartaz\":[]}"
+}
+
+
+### 6. RECUPERAR CARTAZ DIRETAMENTE PELO ID
+# O StateJson deve retornar exatamente o conteúdo salvo acima.
+GET http://localhost:5297/api/tenants/designer-posters/{{posterId}}
+Authorization: Bearer {{tokenMusico}}
+
+
+### 7. RECUPERAR CARTAZ ATIVO
+# Simula o músico saindo e entrando novamente no Seven Designer.
+#
+# IMPORTANTE:
+# - deve retornar o MESMO posterId
+# - backgroundId deve ser bkg16
+# - stateJson deve conter "Dorival Araujo"
+# - stateJson deve conter "Teste persistente"
+POST http://localhost:5297/api/tenants/designer-posters/active/ensure
+Authorization: Bearer {{tokenMusico}}
+
+
+### 8. VERIFICAR QUE AUTOSAVE NÃO CONSUMIU FRANQUIA
+# Ainda esperamos:
+#
+# used: 0
+# limit: 10
+# canCreate: true
+#
+# O cartaz continua sendo draft.
+GET http://localhost:5297/api/tenants/designer-posters
+Authorization: Bearer {{tokenMusico}}
+
+
+
+# ====================================================================
+# SEVEN DESIGNER — SALVAR CARTAZ / LIMITE DO PLANO
+# ====================================================================
+
+### 9. SALVAR/NOMEAR O CARTAZ ATIVO
+# Deve:
+# - manter o MESMO ID
+# - alterar IsDraft para false
+# - continuar IsActive = true
+# - passar a consumir 1 vaga do plano
+POST http://localhost:5297/api/tenants/designer-posters/{{posterId}}/save
+Authorization: Bearer {{tokenMusico}}
+Content-Type: application/json
+
+{
+  "name": "Show Fazenda Monte Belo"
+}
+
+
+### 10. CONSULTAR O CARTAZ APÓS SALVAR
+# Esperado:
+# name = "Show Fazenda Monte Belo"
+# isDraft = false
+# isActive = true
+GET http://localhost:5297/api/tenants/designer-posters/{{posterId}}
+Authorization: Bearer {{tokenMusico}}
+
+
+### 11. CONFERIR CONSUMO DO PLANO
+# Esperado:
+# used = 1
+# limit = 10
+# canCreate = true
+GET http://localhost:5297/api/tenants/designer-posters
+Authorization: Bearer {{tokenMusico}}
+
+
+### 12. AUTOSAVE DE UM CARTAZ JÁ SALVO
+# Deve atualizar o MESMO cartaz.
+# Não pode criar outro registro.
+# used deve continuar 1.
+PUT http://localhost:5297/api/tenants/designer-posters/{{posterId}}/autosave
+Authorization: Bearer {{tokenMusico}}
+Content-Type: application/json
+
+{
+  "templateId": "sertanejo-sunset",
+  "backgroundId": "bkg30",
+  "stateJson": "{\"dados\":{\"artista\":\"Teste Artista\",\"data\":\"2026-09-19\",\"horario\":\"21:00\",\"local\":\"Fazenda Monte Belo\",\"cidade\":\"Cornelio Procopio - PR\",\"chamada\":\"Show ao vivo\",\"extra\":\"Cartaz alterado depois de salvo\"},\"textosLivres\":[{\"id\":\"texto-teste-1\",\"texto\":\"ALTERADO PELO AUTOSAVE\",\"x\":180,\"y\":420}],\"imagensCartaz\":[],\"formasCartaz\":[]}"
+}
+
+
+### 13. CONSULTAR NOVAMENTE
+# Esperado:
+# mesmo posterId
+# name continua "Show Fazenda Monte Belo"
+# backgroundId = bkg30
+# stateJson contém "ALTERADO PELO AUTOSAVE"
+# isDraft continua false
+GET http://localhost:5297/api/tenants/designer-posters/{{posterId}}
+Authorization: Bearer {{tokenMusico}}
+
+
+### 14. CONFERIR QUE AUTOSAVE NÃO CONSUMIU NOVA VAGA
+# CRÍTICO:
+# used precisa continuar 1, e NÃO 2.
+GET http://localhost:5297/api/tenants/designer-posters
+Authorization: Bearer {{tokenMusico}}
+
+
+### 15. ACTIVE/ENSURE DEPOIS DO CARTAZ TER SIDO SALVO
+# Simula sair e entrar novamente no Seven Designer.
+#
+# Deve retornar:
+# - mesmo posterId
+# - name = "Show Fazenda Monte Belo"
+# - isDraft = false
+# - isActive = true
+# - backgroundId = bkg30
+# - stateJson com "ALTERADO PELO AUTOSAVE"
+POST http://localhost:5297/api/tenants/designer-posters/active/ensure
+Authorization: Bearer {{tokenMusico}}
+
+
+
+# ====================================================================
+# SEVEN DESIGNER — NOVO / ABRIR / DUPLICAR / EXCLUIR
+# ÚLTIMA BATERIA DO BACKEND
+# ====================================================================
+
+# O @posterId continua sendo o cartaz:
+# "Show Fazenda Monte Belo"
+
+
+### 16. CRIAR NOVO CARTAZ
+# Esperado:
+# - cria um NOVO ID
+# - name = "Cartaz em criação"
+# - isDraft = true
+# - isActive = true
+#
+# O cartaz "Show Fazenda Monte Belo":
+# - continua salvo
+# - passa para isActive = false
+#
+# used deve continuar 1.
+POST http://localhost:5297/api/tenants/designer-posters/new
+Authorization: Bearer {{tokenMusico}}
+
+
+### 17. LISTAR APÓS CRIAR NOVO
+# Esperado:
+#
+# Cartaz em criação
+#   isDraft = true
+#   isActive = true
+#
+# Show Fazenda Monte Belo
+#   isDraft = false
+#   isActive = false
+#
+# used = 1
+# limit = 10
+# canCreate = true
+GET http://localhost:5297/api/tenants/designer-posters
+Authorization: Bearer {{tokenMusico}}
+
+
+### 18. ABRIR NOVAMENTE O CARTAZ SALVO
+# Deve tornar Fazenda Monte Belo o único ativo.
+POST http://localhost:5297/api/tenants/designer-posters/{{posterId}}/open
+Authorization: Bearer {{tokenMusico}}
+
+
+### 19. LISTAR E CONFERIR IsActive
+# Esperado:
+#
+# Show Fazenda Monte Belo
+#   isDraft = false
+#   isActive = true
+#
+# Cartaz em criação
+#   isDraft = true
+#   isActive = false
+#
+# IMPORTANTE:
+# somente UM registro pode ter isActive = true.
+GET http://localhost:5297/api/tenants/designer-posters
+Authorization: Bearer {{tokenMusico}}
+
+
+### 20. DUPLICAR O CARTAZ SALVO
+# Esperado:
+# - cria NOVO ID
+# - cópia deve ser um cartaz SALVO
+# - portanto consome uma nova vaga
+POST http://localhost:5297/api/tenants/designer-posters/{{posterId}}/duplicate
+Authorization: Bearer {{tokenMusico}}
+
+
+### 21. CONFERIR FRANQUIA APÓS DUPLICAÇÃO
+# Esperado:
+#
+# used = 2
+# limit = 10
+# canCreate = true
+#
+# Devemos ter:
+# - Fazenda Monte Belo
+# - cópia do Fazenda Monte Belo
+# - Cartaz em criação (não conta)
+GET http://localhost:5297/api/tenants/designer-posters
+Authorization: Bearer {{tokenMusico}}
+
+
+@posterDuplicadoId = 16bcced1-94fd-4f63-8083-ead98cd10d85
+
+### 22. EXCLUIR O CARTAZ DUPLICADO
+DELETE http://localhost:5297/api/tenants/designer-posters/{{posterDuplicadoId}}
+Authorization: Bearer {{tokenMusico}}
+
+
+### 23. CONFERIR FRANQUIA APÓS EXCLUSÃO
+# Esperado:
+#
+# used volta para 1
+# limit = 10
+# canCreate = true
+GET http://localhost:5297/api/tenants/designer-posters
+Authorization: Bearer {{tokenMusico}}
+
+
+### 24. CONFIRMAR RECUPERAÇÃO DO ATIVO
+# Deve continuar existindo exatamente um cartaz ativo.
+#
+# Se Fazenda Monte Belo permaneceu ativo durante a duplicação/exclusão,
+# deve retornar o ID original em @posterId.
+POST http://localhost:5297/api/tenants/designer-posters/active/ensure
+Authorization: Bearer {{tokenMusico}}

@@ -35,6 +35,9 @@ public class DesignerAsset
     public int? Height { get; set; }
 
     [Required]
+    public bool IsArchived { get; set; } = false;
+
+    [Required]
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public DesignerAsset() => Id = Guid.NewGuid();
