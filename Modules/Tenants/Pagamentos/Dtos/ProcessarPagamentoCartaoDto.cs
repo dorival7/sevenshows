@@ -48,5 +48,12 @@ namespace SevenShows.Api.Modules.Tenants.Pagamentos.Dtos
 
         [Required(ErrorMessage = "O CEP de faturamento do titular é obrigatório.")]
         public string PostalCode { get; set; } = string.Empty;
+
+        public string AddressNumber { get; set; } = string.Empty;
+        public string Street { get; set; } = string.Empty;
+        public string Neighborhood { get; set; } = string.Empty;
+        public string City { get; set; } = string.Empty;
+        public string State { get; set; } = string.Empty;
+        public string Complement { get; set; } = string.Empty;
     }
 }

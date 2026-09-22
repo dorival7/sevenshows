@@ -63,6 +63,12 @@ namespace SevenShows.Api.Modules.Tenants.Pagamentos.Controllers
             decimal taxaPlataforma = Math.Round(valorBrutoContratacao * 0.05m, 2);
             decimal valorLiquidoMusico = Math.Round(valorBrutoContratacao - taxaPlataforma, 2);
 
+            // O número do endereço é obrigatório no creditCardHolderInfo do Asaas.
+            // Para o próprio contratante, usa o endereço já cadastrado. Para outro titular, usa o endereço informado no checkout.
+            string numeroTitularCartao = !string.IsNullOrWhiteSpace(model.HolderInfo.AddressNumber)
+                ? model.HolderInfo.AddressNumber.Trim()
+                : numeroSeguro;
+
             var asaasPayload = new Dictionary<string, object>
             {
                 { "customer", asaasCustomerId },
@@ -71,7 +77,7 @@ namespace SevenShows.Api.Modules.Tenants.Pagamentos.Controllers
                 { "dueDate", DateTime.UtcNow.ToString("yyyy-MM-dd") },
                 { "description", $"Cachê em Custódia - Cartão Proposta {eventoShow.Id}" },
                 { "creditCard", new { holderName = model.HolderInfo.Name, number = model.CartaoNumero, expiryMonth = model.CartaoValidadeMes, expiryYear = model.CartaoValidadeAno, ccv = model.CartaoCvc } },
-                { "creditCardHolderInfo", new { name = model.HolderInfo.Name, cpfCnpj = model.HolderInfo.CpfCnpj, email = model.HolderInfo.Email, phone = model.HolderInfo.Phone, postalCode = model.HolderInfo.PostalCode } },
+                { "creditCardHolderInfo", new { name = model.HolderInfo.Name, cpfCnpj = model.HolderInfo.CpfCnpj, email = model.HolderInfo.Email, phone = model.HolderInfo.Phone, postalCode = model.HolderInfo.PostalCode, addressNumber = numeroTitularCartao } },
                 { "split", new[] { new { walletId = musico.AsaasWalletId, fixedValue = valorLiquidoMusico, chargeFee = false } } }
             };
 
@@ -85,7 +91,11 @@ namespace SevenShows.Api.Modules.Tenants.Pagamentos.Controllers
             var response = await _httpClient.PostAsync($"{asaasUrl}/payments", jsonContent);
             var responseString = await response.Content.ReadAsStringAsync();
 
-            if (!response.IsSuccessStatusCode) return BadRequest(new { success = false, message = "Recusa na transação do cartão.", erroDetalhado = responseString });
+            if (!response.IsSuccessStatusCode)
+            {
+                Console.Error.WriteLine($"[ASAAS][CARTAO] Falha ao criar pagamento. HTTP {(int)response.StatusCode} ({response.StatusCode}). Resposta: {responseString}");
+                return BadRequest(new { success = false, message = "Recusa na transação do cartão.", erroDetalhado = responseString });
+            }
 
             using var jsonDoc = JsonDocument.Parse(responseString);
             var paymentId = jsonDoc.RootElement.GetProperty("id").GetString();
