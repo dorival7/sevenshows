@@ -8,6 +8,7 @@ using SevenShows.Api.Modules.Auth.Models;
 using SevenShows.Api.Modules.Tenants.Models;
 using SevenShows.Modules.Tenants.Models;
 using SevenShows.Api.Modules.Tenants.Repertorios.Models;
+using SevenShows.Api.Modules.Advertising.Models;
 
 namespace SevenShows.Api.Data;
 
@@ -40,6 +41,7 @@ public class AppDbContext : DbContext
     public DbSet<SaaSPlan> SaaSPlans { get; set; } = default!;
     public DbSet<User> Users { get; set; } = default!;
     public DbSet<Role> Roles { get; set; } = default!;
+    public DbSet<AdvertisingCampaign> AdvertisingCampaigns { get; set; } = default!;
 
     // ====================================================================
     // 🏛️ DBSETS ADICIONADOS: Exposição do Ecossistema Isolado do Contratante
@@ -52,6 +54,13 @@ public class AppDbContext : DbContext
         base.OnModelCreating(modelBuilder);
 
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
+
+        modelBuilder.Entity<AdvertisingCampaign>(entity =>
+        {
+            entity.HasIndex(x => x.Slug);
+            entity.HasIndex(x => new { x.Status, x.StartDate, x.EndDate });
+            entity.Property(x => x.ContractValue).HasColumnType("decimal(18,2)");
+        });
 
         // 1. Mantém as regras e propriedades originais do seu SaaSPlan intactas
         modelBuilder.Entity<SaaSPlan>(entity =>

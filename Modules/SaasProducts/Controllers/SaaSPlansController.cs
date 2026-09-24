@@ -85,6 +85,8 @@ public class SaaSPlansController : ControllerBase
     existingPlan.MaxPhotosCount = updatedPlan.MaxPhotosCount;
     existingPlan.MaxVideosCount = updatedPlan.MaxVideosCount;
     existingPlan.MaxDesignerAssets = updatedPlan.MaxDesignerAssets;
+    existingPlan.MaxDesignerPosters = updatedPlan.MaxDesignerPosters;
+    existingPlan.DurationMonths = updatedPlan.DurationMonths;
     existingPlan.IsActive = updatedPlan.IsActive;
 
     await _context.SaveChangesAsync();

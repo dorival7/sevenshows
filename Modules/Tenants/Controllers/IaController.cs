@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Text;
 using System.Text.Json;
@@ -1951,6 +1951,7 @@ Retorne somente as {quantidadeLote} linhas.
       var tavilyUrlFinal =
           "https://api.tavily.com/search";
 
+
       var payloadBusca = new
       {
         query = queryTavily,
@@ -2070,6 +2071,7 @@ Retorne somente as {quantidadeLote} linhas.
             propriedadeUrl.GetString()
             ?? string.Empty;
 
+
         if (string.IsNullOrWhiteSpace(urlCand))
         {
           continue;
@@ -2133,6 +2135,7 @@ Retorne somente as {quantidadeLote} linhas.
       {
         urlCifraReal += "/";
       }
+
 
       // ============================================================
       // A PARTIR DAQUI NÃO HÁ MAIS TAVILY.
@@ -2336,6 +2339,7 @@ Retorne somente as {quantidadeLote} linhas.
   // Este método NÃO usa Tavily.
   // ====================================================================
 
+
   private async Task<IActionResult> ProcessarCifraClubUrl(
     string urlCifraReal,
     string nomeMusicaFallback,
@@ -2399,20 +2403,56 @@ Retorne somente as {quantidadeLote} linhas.
     // 2. DOWNLOAD DO HTML DA CIFRA
     // ================================================================
 
-    _http.DefaultRequestHeaders.Clear();
+    // O Cifra Club/Akamai passou a recusar requisições HTTP simples.
+    // O diagnóstico confirmou que os headers de navegação abaixo são
+    // suficientes para a mesma URL responder 200 OK, sem cookies prévios.
+    using var handlerCifraClub = new HttpClientHandler
+    {
+      AllowAutoRedirect = true,
+      AutomaticDecompression =
+        System.Net.DecompressionMethods.GZip |
+        System.Net.DecompressionMethods.Deflate |
+        System.Net.DecompressionMethods.Brotli
+    };
 
-    _http.DefaultRequestHeaders.Add(
-        "User-Agent",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
-        "AppleWebKit/537.36 (KHTML, like Gecko) " +
-        "Chrome/120.0.0.0 Safari/537.36"
+    using var clientCifraClub = new HttpClient(handlerCifraClub)
+    {
+      Timeout = TimeSpan.FromSeconds(25)
+    };
+
+    using var requestPagina = new HttpRequestMessage(HttpMethod.Get, urlCifraReal);
+
+    requestPagina.Headers.TryAddWithoutValidation(
+      "User-Agent",
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+      "AppleWebKit/537.36 (KHTML, like Gecko) " +
+      "Chrome/140.0.0.0 Safari/537.36"
     );
+    requestPagina.Headers.TryAddWithoutValidation(
+      "Accept",
+      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+    );
+    requestPagina.Headers.TryAddWithoutValidation(
+      "Accept-Language",
+      "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
+    );
+    requestPagina.Headers.TryAddWithoutValidation("Upgrade-Insecure-Requests", "1");
+    requestPagina.Headers.TryAddWithoutValidation("Sec-Fetch-Dest", "document");
+    requestPagina.Headers.TryAddWithoutValidation("Sec-Fetch-Mode", "navigate");
+    requestPagina.Headers.TryAddWithoutValidation("Sec-Fetch-Site", "none");
+    requestPagina.Headers.TryAddWithoutValidation("Sec-Fetch-User", "?1");
+    requestPagina.Headers.TryAddWithoutValidation(
+      "sec-ch-ua",
+      "\"Chromium\";v=\"140\", \"Not=A?Brand\";v=\"24\""
+    );
+    requestPagina.Headers.TryAddWithoutValidation("sec-ch-ua-mobile", "?0");
+    requestPagina.Headers.TryAddWithoutValidation("sec-ch-ua-platform", "\"Windows\"");
 
-    using var respostaPagina =
-        await _http.GetAsync(
-            urlCifraReal,
-            cancellationToken
-        );
+    using var respostaPagina = await clientCifraClub.SendAsync(
+      requestPagina,
+      HttpCompletionOption.ResponseHeadersRead,
+      cancellationToken
+    );
 
     if (!respostaPagina.IsSuccessStatusCode)
     {
@@ -2421,7 +2461,11 @@ Retorne somente as {quantidadeLote} linhas.
           new
           {
             mensagem =
-                  "Não foi possível carregar a página da cifra."
+                  "Não foi possível carregar a página da cifra.",
+            statusCifraClub =
+                  (int)respostaPagina.StatusCode,
+            urlCifraClub =
+                  urlCifraReal
           }
       );
     }
