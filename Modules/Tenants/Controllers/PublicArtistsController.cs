@@ -335,6 +335,18 @@ public class PublicArtistsController : ControllerBase
           ExtraKmValue = _context.ArtistComercialSettings
                 .Where(c => c.UserId == p.UserId)
                 .Select(c => c.ExtraKmValue)
+                .FirstOrDefault(),
+
+          // ⏱️ REGRAS COMERCIAIS DE HORA EXTRA: usadas pelo checkout para decidir
+          // se o artista aceita extensão do show e qual o valor unitário da hora.
+          AcceptExtraHours = _context.ArtistComercialSettings
+                .Where(c => c.UserId == p.UserId)
+                .Select(c => c.AcceptExtraHours)
+                .FirstOrDefault(),
+
+          ExtraHourValue = _context.ArtistComercialSettings
+                .Where(c => c.UserId == p.UserId)
+                .Select(c => c.ExtraHourValue)
                 .FirstOrDefault()
         })
         .FirstOrDefaultAsync();
