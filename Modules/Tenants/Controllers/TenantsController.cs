@@ -139,6 +139,7 @@ public class TenantsController : ControllerBase
         {
             id = user.Id,
             name = user.Name,
+            slug = user.Slug ?? "",
             email = user.Email,
             personType = user.PersonType,
             profileStatus = user.ProfileStatus,
