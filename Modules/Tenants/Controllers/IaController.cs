@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Text;
 using System.Text.Json;
@@ -6,6 +6,9 @@ using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using HtmlAgilityPack;
 using System.Globalization;
+using Microsoft.EntityFrameworkCore;
+using SevenShows.Api.Data;
+using SevenShows.Api.Modules.Tenants.Models;
 
 namespace SevenShows.Api.Modules.Tenants.Controllers;
 
@@ -124,11 +127,13 @@ public class GroqResponse
 public class IaController : ControllerBase
 {
   private readonly IConfiguration _configuration;
+  private readonly AppDbContext _db;
   private static readonly HttpClient _http = new HttpClient();
 
-  public IaController(IConfiguration configuration)
+  public IaController(IConfiguration configuration, AppDbContext db)
   {
     _configuration = configuration;
+    _db = db;
 
     if (!_http.DefaultRequestHeaders.Contains("User-Agent"))
     {
@@ -1524,6 +1529,32 @@ Retorne somente as {quantidadeLote} linhas.
     try
     {
       // ============================================================
+      // 0. CACHE SEVEN SHOWS
+      //
+      // Nome da música é obrigatório; artista continua opcional.
+      // O cache guarda exatamente o resultado já limpo/processado
+      // que seria devolvido ao Vue.
+      // ============================================================
+      var cifraCache = await BuscarCifraCacheAsync(
+          request.NomeMusica,
+          request.NomeArtista
+      );
+
+      if (cifraCache != null)
+      {
+        Console.WriteLine(
+            $"[CIFRAS][CACHE-HIT][BUSCA] musica={request.NomeMusica} artista={request.NomeArtista}"
+        );
+
+        // HIT é terminal: sem Tavily, sem Cifra Club e sem escrita no BD.
+        return Ok(MontarRespostaCache(cifraCache));
+      }
+
+      Console.WriteLine(
+          $"[CIFRAS][CACHE-MISS][BUSCA] musica={request.NomeMusica} artista={request.NomeArtista}"
+      );
+
+      // ============================================================
       // 1. BUSCA NORMAL
       //
       // SOMENTE ESTE ENDPOINT USA TAVILY.
@@ -1742,7 +1773,9 @@ Retorne somente as {quantidadeLote} linhas.
       return await ProcessarCifraClubUrl(
           urlCifraReal,
           request.NomeMusica,
-          cts.Token
+          cts.Token,
+          request.NomeMusica,
+          request.NomeArtista
       );
 
     }
@@ -1886,6 +1919,26 @@ Retorne somente as {quantidadeLote} linhas.
           Uri.EscapeDataString(segmentos[1]) +
           "/";
 
+      // A relacionada já possui uma URL canônica. Se ela já foi
+      // processada anteriormente, retorna diretamente do nosso BD.
+      var cifraCacheRelacionada = await _db.CifrasCache
+          .AsNoTracking()
+          .FirstOrDefaultAsync(x => x.SourceUrl == urlCifraReal);
+
+      if (cifraCacheRelacionada != null)
+      {
+        Console.WriteLine(
+            $"[CIFRAS][CACHE-HIT][RELACIONADA] url={urlCifraReal}"
+        );
+
+        // HIT por SourceUrl é terminal: não acessa o Cifra Club.
+        return Ok(MontarRespostaCache(cifraCacheRelacionada));
+      }
+
+      Console.WriteLine(
+          $"[CIFRAS][CACHE-MISS][RELACIONADA] url={urlCifraReal}"
+      );
+
       using var cts =
           new CancellationTokenSource(
               TimeSpan.FromSeconds(25)
@@ -1938,7 +1991,9 @@ Retorne somente as {quantidadeLote} linhas.
   private async Task<IActionResult> ProcessarCifraClubUrl(
     string urlCifraReal,
     string nomeMusicaFallback,
-    CancellationToken cancellationToken)
+    CancellationToken cancellationToken,
+    string? nomeMusicaBusca = null,
+    string? nomeArtistaBusca = null)
   {
     // ================================================================
     // 1. VALIDA NOVAMENTE A URL
@@ -2778,29 +2833,215 @@ Retorne somente as {quantidadeLote} linhas.
     // 13. RETORNO PARA O VUE
     // ================================================================
 
-    return Ok(new
+    // ================================================================
+    // 13.1 CACHE SEVEN SHOWS
+    //
+    // Persistimos SOMENTE o conteúdo final já limpo pelo .NET.
+    // O HTML bruto do Cifra Club nunca é armazenado.
+    // ================================================================
+    var cacheSalvo = await SalvarCifraCacheAsync(
+        musicaMapeada,
+        artistaMapeado,
+        tomOriginalMapeado,
+        cifraTextoPuroFinal,
+        htmlInternoLimpo,
+        listaRelacionadas,
+        urlCifraReal,
+        cancellationToken,
+        nomeMusicaBusca,
+        nomeArtistaBusca
+    );
+
+    return Ok(MontarRespostaCache(cacheSalvo));
+  }
+
+
+  // ====================================================================
+  // CACHE DE CIFRAS SEVEN SHOWS
+  // ====================================================================
+
+  private async Task<CifraCache?> BuscarCifraCacheAsync(
+      string nomeMusica,
+      string? nomeArtista)
+  {
+    var musicaNormalizada = NormalizarBuscaCifra(nomeMusica);
+
+    if (string.IsNullOrWhiteSpace(musicaNormalizada))
     {
-      musica =
-            musicaMapeada,
+      return null;
+    }
 
-      artista =
-            artistaMapeado,
+    var query = _db.CifrasCache
+        .AsNoTracking()
+        .Where(x => x.NomeMusicaNormalizado == musicaNormalizada);
 
-      tomOriginal =
-            tomOriginalMapeado,
+    if (!string.IsNullOrWhiteSpace(nomeArtista))
+    {
+      var artistaNormalizado = NormalizarBuscaCifra(nomeArtista);
+      query = query.Where(x => x.NomeArtistaNormalizado == artistaNormalizado);
+    }
 
-      tomSolicitado =
-            tomOriginalMapeado,
+    // Sem artista, preservamos a busca opcional atual e usamos a versão
+    // mais acessada/recente caso existam intérpretes diferentes.
+    return await query
+        .OrderByDescending(x => x.SearchCount)
+        .ThenByDescending(x => x.UpdatedAt)
+        .FirstOrDefaultAsync();
+  }
 
-      cifraCompleta =
-            cifraTextoPuroFinal,
+  private object MontarRespostaCache(CifraCache cifra)
+  {
+    List<MusicaRelacionadaDto> relacionadas;
 
-      htmlEstruturado =
-            htmlInternoLimpo,
+    try
+    {
+      relacionadas = JsonSerializer.Deserialize<List<MusicaRelacionadaDto>>(
+          cifra.RelacionadasJson
+      ) ?? new List<MusicaRelacionadaDto>();
+    }
+    catch
+    {
+      relacionadas = new List<MusicaRelacionadaDto>();
+    }
 
-      relacionadas =
-            listaRelacionadas
-    });
+    return new
+    {
+      musica = cifra.NomeMusica,
+      artista = cifra.NomeArtista,
+      tomOriginal = cifra.TomOriginal,
+      tomSolicitado = cifra.TomOriginal,
+      cifraCompleta = cifra.CifraCompleta,
+      htmlEstruturado = cifra.HtmlEstruturado,
+      relacionadas
+    };
+  }
+
+  private async Task<CifraCache> SalvarCifraCacheAsync(
+      string nomeMusica,
+      string nomeArtista,
+      string tomOriginal,
+      string cifraCompleta,
+      string htmlEstruturado,
+      List<MusicaRelacionadaDto> relacionadas,
+      string sourceUrl,
+      CancellationToken cancellationToken,
+      string? nomeMusicaBusca = null,
+      string? nomeArtistaBusca = null)
+  {
+    var musicaChave = string.IsNullOrWhiteSpace(nomeMusicaBusca)
+        ? nomeMusica
+        : nomeMusicaBusca;
+
+    var artistaChave = string.IsNullOrWhiteSpace(nomeArtistaBusca)
+        ? nomeArtista
+        : nomeArtistaBusca;
+
+    var musicaNormalizada = NormalizarBuscaCifra(musicaChave);
+    var artistaNormalizado = NormalizarBuscaCifra(artistaChave);
+
+    // Defesa por URL: uma cifra já conhecida nunca é sobrescrita.
+    var existente = await _db.CifrasCache
+        .AsNoTracking()
+        .FirstOrDefaultAsync(
+            x => x.SourceUrl == sourceUrl,
+            cancellationToken
+        );
+
+    if (existente != null)
+    {
+      Console.WriteLine(
+          $"[CIFRAS][CACHE-EXISTENTE][SOURCE-URL] id={existente.Id} url={sourceUrl}"
+      );
+      return existente;
+    }
+
+    // Defesa pela mesma chave usada na busca normal.
+    existente = await _db.CifrasCache
+        .AsNoTracking()
+        .FirstOrDefaultAsync(
+            x => x.NomeMusicaNormalizado == musicaNormalizada &&
+                 x.NomeArtistaNormalizado == artistaNormalizado,
+            cancellationToken
+        );
+
+    if (existente != null)
+    {
+      Console.WriteLine(
+          $"[CIFRAS][CACHE-EXISTENTE][CHAVE] id={existente.Id} musica={musicaChave} artista={artistaChave}"
+      );
+      return existente;
+    }
+
+    var agora = DateTime.UtcNow;
+
+    var novaCifra = new CifraCache
+    {
+      NomeMusica = nomeMusica.Trim(),
+      NomeMusicaNormalizado = musicaNormalizada,
+      NomeArtista = nomeArtista.Trim(),
+      NomeArtistaNormalizado = artistaNormalizado,
+      TomOriginal = tomOriginal.Trim(),
+      CifraCompleta = cifraCompleta,
+      HtmlEstruturado = htmlEstruturado,
+      RelacionadasJson = JsonSerializer.Serialize(relacionadas),
+      SourceUrl = sourceUrl,
+      FormatoVersao = 1,
+      SearchCount = 1,
+      CreatedAt = agora,
+      UpdatedAt = agora,
+      LastAccessAt = agora
+    };
+
+    _db.CifrasCache.Add(novaCifra);
+    await _db.SaveChangesAsync(cancellationToken);
+
+    Console.WriteLine(
+        $"[CIFRAS][CACHE-INSERT] id={novaCifra.Id} musica={musicaChave} artista={artistaChave} url={sourceUrl}"
+    );
+
+    return novaCifra;
+  }
+
+  private static string NormalizarBuscaCifra(string? valor)
+  {
+    if (string.IsNullOrWhiteSpace(valor))
+    {
+      return string.Empty;
+    }
+
+    // O Cifra Club usa "e" nos slugs de duplas/grupos
+    // (ex.: leandro-e-leonardo), enquanto o músico pode buscar
+    // "Leandro & Leonardo". Ambos precisam gerar a mesma chave.
+    var valorCanonico = valor
+        .Trim()
+        .Replace("&", " e ", StringComparison.Ordinal);
+
+    var decomposed = valorCanonico
+        .ToLowerInvariant()
+        .Normalize(NormalizationForm.FormD);
+    var sb = new StringBuilder(decomposed.Length);
+    var ultimoFoiEspaco = false;
+
+    foreach (var c in decomposed)
+    {
+      if (CharUnicodeInfo.GetUnicodeCategory(c) == UnicodeCategory.NonSpacingMark)
+      {
+        continue;
+      }
+
+      if (char.IsLetterOrDigit(c))
+      {
+        sb.Append(c);
+        ultimoFoiEspaco = false;
+      }
+      else if (!ultimoFoiEspaco && sb.Length > 0)
+      {
+        sb.Append(' ');
+        ultimoFoiEspaco = true;
+      }
+    }
+
+    return sb.ToString().Trim();
   }
 
 

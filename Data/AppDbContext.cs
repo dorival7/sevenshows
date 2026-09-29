@@ -22,6 +22,7 @@ public class AppDbContext : DbContext
     {
     }
 
+    public DbSet<CifraCache> CifrasCache { get; set; } = default!;
     public DbSet<DesignerAsset> DesignerAssets { get; set; } = default!;
     public DbSet<Repertorio> Repertorios { get; set; } = default!;
     public DbSet<RepertorioMusica> RepertorioMusicas { get; set; } = default!;
@@ -70,6 +71,23 @@ public class AppDbContext : DbContext
 
             entity.Property(p => p.DefaultTakeRatePercent)
                   .HasColumnType("decimal(5,2)");
+        });
+
+        modelBuilder.Entity<CifraCache>(entity =>
+        {
+            entity.ToTable("cifras_cache");
+            entity.Property(x => x.NomeMusica).HasMaxLength(300);
+            entity.Property(x => x.NomeMusicaNormalizado).HasMaxLength(300);
+            entity.Property(x => x.NomeArtista).HasMaxLength(300);
+            entity.Property(x => x.NomeArtistaNormalizado).HasMaxLength(300);
+            entity.Property(x => x.TomOriginal).HasMaxLength(30);
+            entity.Property(x => x.CifraCompleta).HasColumnType("longtext");
+            entity.Property(x => x.HtmlEstruturado).HasColumnType("longtext");
+            entity.Property(x => x.RelacionadasJson).HasColumnType("longtext");
+            entity.Property(x => x.SourceUrl).HasMaxLength(700);
+            entity.HasIndex(x => new { x.NomeMusicaNormalizado, x.NomeArtistaNormalizado }).IsUnique();
+            entity.HasIndex(x => x.NomeMusicaNormalizado);
+            entity.HasIndex(x => x.SourceUrl).IsUnique();
         });
 
         modelBuilder.Entity<Repertorio>(entity =>
