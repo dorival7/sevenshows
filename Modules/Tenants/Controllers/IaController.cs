@@ -11,7 +11,7 @@ namespace SevenShows.Api.Modules.Tenants.Controllers;
 
 public class TransposeCifraRequest
 {
-  [JsonPropertyName("htmlEstruturado")] public string HtmlEstruturado { get; set; } = string.Empty;
+  [JsonPropertyName("acordes")] public List<string> Acordes { get; set; } = new();
   [JsonPropertyName("tomOriginal")] public string TomOriginal { get; set; } = string.Empty;
   [JsonPropertyName("tomDesejado")] public string TomDesejado { get; set; } = string.Empty;
 }
@@ -1189,12 +1189,12 @@ Retorne somente as {quantidadeLote} linhas.
         });
       }
 
-      if (string.IsNullOrWhiteSpace(request.HtmlEstruturado))
+      if (request.Acordes == null || request.Acordes.Count == 0)
       {
         return BadRequest(new
         {
-          cifraTransposta = "",
-          mensagem = "HtmlEstruturado não foi informado."
+          acordes = Array.Empty<string>(),
+          mensagem = "A lista de acordes não foi informada."
         });
       }
 
@@ -1475,427 +1475,22 @@ Retorne somente as {quantidadeLote} linhas.
       }
 
       // ============================================================
-      // 9. CARREGA HTML ORIGINAL
+      // 9. TRANSPÕE SOMENTE O ARRAY
+      // O backend não recebe nem reconstrói HTML.
       // ============================================================
 
-      var docHtml =
-          new HtmlDocument
-          {
-            OptionWriteEmptyNodes = true
-          };
-
-      docHtml.LoadHtml(
-          request.HtmlEstruturado
-      );
-
-      // ============================================================
-      // 10. LOCALIZA SOMENTE <b data-chord-name>
-      //
-      // Assim nenhum texto da letra pode ser confundido
-      // com acorde.
-      // ============================================================
-
-      var nosAcordes =
-          docHtml.DocumentNode.SelectNodes(
-              "//b[@data-chord-name]"
-          );
-
-      int acordesProcessados = 0;
-
-      var mapaTransposicao =
-          new Dictionary<string, string>(
-              StringComparer.OrdinalIgnoreCase
-          );
-
-      if (nosAcordes != null)
-      {
-        foreach (var noAcorde in nosAcordes.ToList())
-        {
-          string acordeOriginal =
-              noAcorde.GetAttributeValue(
-                  "data-chord-name",
-                  string.Empty
-              );
-
-          if (string.IsNullOrWhiteSpace(acordeOriginal))
-          {
-            acordeOriginal =
-                HtmlEntity.DeEntitize(
-                    noAcorde.InnerText
-                );
-          }
-
-          acordeOriginal =
-              acordeOriginal.Trim();
-
-          if (string.IsNullOrWhiteSpace(acordeOriginal))
-            continue;
-
-          string acordeTransposto =
-              TransporAcorde(acordeOriginal);
-
-          // ====================================================
-          // 10.1 CALCULA DIFERENÇA DE LARGURA
-          //
-          // B -> A#
-          // diferença +1
-          //
-          // F# -> F
-          // diferença -1
-          // ====================================================
-
-          int diferenca =
-              acordeTransposto.Length -
-              acordeOriginal.Length;
-
-          // ====================================================
-          // 10.2 ALTERA SOMENTE O ACORDE
-          // ====================================================
-
-          noAcorde.SetAttributeValue(
-              "data-chord-name",
-              acordeTransposto
-          );
-
-          noAcorde.InnerHtml =
-              HtmlEntity.Entitize(
-                  acordeTransposto
-              );
-
-          // ====================================================
-          // 10.3 COMPENSAÇÃO HORIZONTAL
-          //
-          // IMPORTANTE:
-          //
-          // Esta lógica mantém a coluna inicial dos acordes.
-          // Não alterar.
-          // ====================================================
-
-          HtmlNode? proximo =
-              noAcorde.NextSibling;
-
-          if (proximo != null &&
-              proximo.NodeType == HtmlNodeType.Text)
-          {
-            string textoSeguinte =
-                ((HtmlTextNode)proximo).Text;
-
-            if (diferenca > 0)
-            {
-              // --------------------------------------------
-              // O novo acorde ficou MAIOR.
-              //
-              // Exemplo:
-              //
-              // B -> A#
-              //
-              // Retira a diferença dos espaços posteriores.
-              // --------------------------------------------
-
-              int quantidadeEspacos = 0;
-
-              while (
-                  quantidadeEspacos <
-                      textoSeguinte.Length &&
-                  textoSeguinte[
-                      quantidadeEspacos
-                  ] == ' ')
-              {
-                quantidadeEspacos++;
-              }
-
-              int realmenteRemover =
-                  Math.Min(
-                      diferenca,
-                      quantidadeEspacos
-                  );
-
-              if (realmenteRemover > 0)
-              {
-                textoSeguinte =
-                    textoSeguinte.Substring(
-                        realmenteRemover
-                    );
-              }
-            }
-            else if (diferenca < 0)
-            {
-              // --------------------------------------------
-              // O novo acorde ficou MENOR.
-              //
-              // Exemplo:
-              //
-              // F# -> F
-              //
-              // Acrescenta a diferença depois do acorde.
-              // --------------------------------------------
-
-              int adicionar =
-                  Math.Abs(diferenca);
-
-              textoSeguinte =
-                  new string(
-                      ' ',
-                      adicionar
-                  ) +
-                  textoSeguinte;
-            }
-
-            ((HtmlTextNode)proximo).Text =
-                textoSeguinte;
-          }
-          else if (diferenca < 0)
-          {
-            // =================================================
-            // Caso não exista TextNode depois do acorde
-            // =================================================
-
-            int adicionar =
-                Math.Abs(diferenca);
-
-            var espaco =
-                docHtml.CreateTextNode(
-                    new string(
-                        ' ',
-                        adicionar
-                    )
-                );
-
-            noAcorde
-                .ParentNode
-                .InsertAfter(
-                    espaco,
-                    noAcorde
-                );
-          }
-
-          acordesProcessados++;
-
-          if (!mapaTransposicao.ContainsKey(
-                  acordeOriginal))
-          {
-            mapaTransposicao.Add(
-                acordeOriginal,
-                acordeTransposto
-            );
-          }
-        }
-      }
-
-      // ============================================================
-      // 11. LOCALIZA AS LINHAS kvMV
-      // ============================================================
-
-      var linhasDom =
-          docHtml.DocumentNode.SelectNodes(
-              "//div[contains(" +
-              "concat(' ', normalize-space(@class), ' '), " +
-              "' kvMV '" +
-              ")]"
-          );
-
-      if (linhasDom == null ||
-          linhasDom.Count == 0)
-      {
-        return BadRequest(new
-        {
-          cifraTransposta = "",
-          mensagem =
-                "Nenhuma linha kvMV foi encontrada no HTML."
-        });
-      }
-
-      // ============================================================
-      // 12. EXTRAI UMA LINHA PRESERVANDO ESPAÇOS HORIZONTAIS
-      // ============================================================
-
-      static string ExtrairLinha(
-          HtmlNode linha)
-      {
-        var sb =
-            new StringBuilder();
-
-        void Percorrer(HtmlNode node)
-        {
-          foreach (var filho in node.ChildNodes)
-          {
-            // ================================================
-            // TEXT NODE
-            // ================================================
-
-            if (filho.NodeType ==
-                HtmlNodeType.Text)
-            {
-              string texto =
-                  ((HtmlTextNode)filho).Text;
-
-              texto =
-                  HtmlEntity.DeEntitize(
-                      texto
-                  );
-
-              // --------------------------------------------
-              // NÃO FAZER:
-              //
-              // texto.Trim()
-              // texto.TrimStart()
-              // Regex.Replace(texto, @"\s+", " ")
-              //
-              // Esses espaços determinam a posição
-              // horizontal dos acordes.
-              // --------------------------------------------
-
-              sb.Append(texto);
-
-              continue;
-            }
-
-            // ================================================
-            // <br>
-            // ================================================
-
-            if (filho.Name.Equals(
-                    "br",
-                    StringComparison.OrdinalIgnoreCase))
-            {
-              sb.Append('\n');
-
-              continue;
-            }
-
-            // ================================================
-            // OUTROS NÓS
-            // ================================================
-
-            Percorrer(filho);
-          }
-        }
-
-        Percorrer(linha);
-
-        return sb.ToString();
-      }
-
-      // ============================================================
-      // 13. EXTRAI TODAS AS LINHAS
-      // ============================================================
-
-      var linhasTexto =
-          new List<string>();
-
-      foreach (var linhaDom in linhasDom)
-      {
-        string linha =
-            ExtrairLinha(
-                linhaDom
-            );
-
-        linhasTexto.Add(
-            linha
-        );
-      }
-
-      // ============================================================
-      // 14. NOVA REGRA DE ESPAÇAMENTO VERTICAL
-      //
-      // DIFERENÇA PARA A VERSÃO ANTERIOR:
-      //
-      // Antes:
-      // mantínhamos uma linha vazia.
-      //
-      // Agora:
-      // linhas kvMV completamente vazias NÃO entram
-      // no texto final.
-      //
-      // IMPORTANTE:
-      //
-      // Isso NÃO modifica os espaços de nenhuma
-      // linha que possui conteúdo.
-      //
-      // Portanto:
-      //
-      // - posição horizontal continua intacta;
-      // - acordes continuam sobre as sílabas;
-      // - somente o excesso vertical é removido.
-      // ============================================================
-
-      var linhasFinais =
-          new List<string>();
-
-      foreach (var linha in linhasTexto)
-      {
-        // --------------------------------------------------------
-        // Se a div kvMV não possui nenhum conteúdo real,
-        // não gera uma linha no <pre>.
-        // --------------------------------------------------------
-
-        if (string.IsNullOrWhiteSpace(linha))
-        {
-          continue;
-        }
-
-        // --------------------------------------------------------
-        // MUITO IMPORTANTE:
-        //
-        // Adicionamos a linha ORIGINAL.
-        //
-        // Não usamos Trim().
-        //
-        // Portanto todos os espaços horizontais continuam
-        // exatamente como foram calculados.
-        // --------------------------------------------------------
-
-        linhasFinais.Add(
-            linha
-        );
-      }
-
-      // ============================================================
-      // 15. MONTA CIFRA FINAL
-      //
-      // Exatamente UMA quebra entre cada linha útil.
-      // ============================================================
-
-      string cifraTransposta =
-          string.Join(
-              "\n",
-              linhasFinais
-          );
-
-      // ============================================================
-      // 16. HTML TRANPOSTO
-      //
-      // O Vue recebe este HTML para utilizar como base
-      // na próxima transposição.
-      // ============================================================
-
-      string htmlTransposto =
-          docHtml.DocumentNode.InnerHtml;
-
-      // ============================================================
-      // 17. RETORNO
-      // ============================================================
+      var acordesTranspostos =
+          request.Acordes
+              .Select(acorde =>
+                  TransporAcorde(acorde ?? string.Empty))
+              .ToList();
 
       return Ok(new
       {
-        cifraTransposta,
-
-        htmlEstruturado =
-              htmlTransposto,
-
-        tomOriginal =
-              request.TomOriginal,
-
-        tomDesejado =
-              request.TomDesejado,
-
-        semitons =
-              deslocamento,
-
-        acordesProcessados,
-
-        mapaAcordes =
-              mapaTransposicao
+        acordes = acordesTranspostos,
+        tomOriginal = request.TomOriginal,
+        tomDesejado = request.TomDesejado,
+        semitons = deslocamento
       });
     }
     catch (Exception ex)
@@ -2475,6 +2070,60 @@ Retorne somente as {quantidadeLote} linhas.
             .ReadAsStringAsync(
                 cancellationToken
             );
+
+    // ================================================================
+    // DEBUG TEMPORÁRIO — HTML COMPLETO RECEBIDO DO CIFRA CLUB
+    // ================================================================
+    // Log em blocos para evitar que consoles/hosts cortem uma única
+    // mensagem muito grande. Nenhum caractere do HTML é alterado.
+    var htmlCifraParaLog = htmlCifra ?? string.Empty;
+    const int tamanhoBlocoLogHtml = 8000;
+    var totalBlocosLogHtml = Math.Max(
+        1,
+        (int)Math.Ceiling(
+            htmlCifraParaLog.Length / (double)tamanhoBlocoLogHtml
+        )
+    );
+
+    Console.WriteLine(
+        $"[CIFRAS][HTML-COMPLETO][INICIO] URL={urlCifraReal} " +
+        $"TAMANHO={htmlCifraParaLog.Length} BLOCOS={totalBlocosLogHtml}"
+    );
+
+    if (htmlCifraParaLog.Length == 0)
+    {
+      Console.WriteLine(
+          "[CIFRAS][HTML-COMPLETO][BLOCO 1/1] <HTML VAZIO>"
+      );
+    }
+    else
+    {
+      for (var indiceBlocoLogHtml = 0;
+           indiceBlocoLogHtml < totalBlocosLogHtml;
+           indiceBlocoLogHtml++)
+      {
+        var inicioBlocoLogHtml =
+            indiceBlocoLogHtml * tamanhoBlocoLogHtml;
+
+        var comprimentoBlocoLogHtml = Math.Min(
+            tamanhoBlocoLogHtml,
+            htmlCifraParaLog.Length - inicioBlocoLogHtml
+        );
+
+        Console.WriteLine(
+            $"[CIFRAS][HTML-COMPLETO][BLOCO " +
+            $"{indiceBlocoLogHtml + 1}/{totalBlocosLogHtml}]\n" +
+            htmlCifraParaLog.Substring(
+                inicioBlocoLogHtml,
+                comprimentoBlocoLogHtml
+            )
+        );
+      }
+    }
+
+    Console.WriteLine(
+        "[CIFRAS][HTML-COMPLETO][FIM]"
+    );
 
     var docPagina =
         new HtmlDocument();
