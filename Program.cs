@@ -110,7 +110,8 @@ builder.Services.AddCors(options =>
             policy
                 .WithOrigins(
                     "http://localhost:8081",
-                    "http://192.168.3.138:8081"
+                    "http://192.168.3.138:8081",
+                    "https://look-aggregate-probably-brick.trycloudflare.com"
                 )
                 .AllowAnyHeader()
                 .AllowAnyMethod();
@@ -158,12 +159,25 @@ app.UseStaticFiles(
     {
         OnPrepareResponse = context =>
         {
-            context.Context
-                .Response
-                .Headers[
-                    HeaderNames.AccessControlAllowOrigin
-                ] =
-                "http://localhost:8081";
+            var origin =
+                context.Context
+                    .Request
+                    .Headers
+                    .Origin
+                    .ToString();
+
+            if (
+                origin == "http://localhost:8081" ||
+                origin == "http://192.168.3.138:8081" ||
+                origin == "https://look-aggregate-probably-brick.trycloudflare.com"
+            )
+            {
+                context.Context
+                    .Response
+                    .Headers[
+                        HeaderNames.AccessControlAllowOrigin
+                    ] = origin;
+            }
         }
     }
 );

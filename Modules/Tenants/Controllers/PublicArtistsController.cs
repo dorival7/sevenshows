@@ -273,7 +273,8 @@ public class PublicArtistsController : ControllerBase
                 {
                   Id = m.Id,
                   MediaUrl = m.MediaUrl,
-                  MediaType = m.MediaType // Devolve o tipo original gravado (Photo, Video, cover, etc)
+                  MediaType = m.MediaType, // Devolve o tipo original gravado (Photo, Video, cover, etc)
+                  Caption = m.Caption
                 })
                 .ToList()
         })
